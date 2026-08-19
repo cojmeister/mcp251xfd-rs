@@ -573,6 +573,11 @@ impl CiTdc {
     }
     /// Sets `TDCO` (bits 14:8): SSP offset in SYSCLK cycles,
     /// two's complement `-64..=63`.
+    /// **Note:** The MCP2518FD datasheet's TDCO value table is internally inconsistent
+    /// (its "1111111 = -64" row contradicts its own "two's complement" statement).
+    /// This field uses standard 7-bit two's complement (0x7F = -1), matching the Emandhal
+    /// C driver and the Linux mcp251xfd driver, preventing future "corrections" from
+    /// breaking the encoding.
     pub const fn with_tdco(self, tdco: i8) -> Self {
         Self((self.0 & !(0x7F << 8)) | (((tdco as u32) & 0x7F) << 8))
     }
@@ -745,14 +750,14 @@ mod tests {
         // 40 MHz, 500 kbit/s, 80 TQ: brp=1, tseg1=63, tseg2=16, sjw=16.
         let r = CiNbtCfg::new(1, 63, 16, 16);
         // BRP bits 31:24, TSEG1 23:16, TSEG2 14:8, SJW 6:0 — all value-1.
-        assert_eq!(r.0, (0u32 << 24) | (62 << 16) | (15 << 8) | 15);
+        assert_eq!(r.0, 0x003E_0F0F); // (0 << 24) | (62 << 16) | (15 << 8) | 15
     }
 
     #[test]
     fn dbtcfg_stores_minus_one() {
         // 2 Mbit/s data phase, 20 TQ: brp=1, tseg1=15, tseg2=4, sjw=4.
         let r = CiDbtCfg::new(1, 15, 4, 4);
-        assert_eq!(r.0, (0u32 << 24) | (14 << 16) | (3 << 8) | 3);
+        assert_eq!(r.0, 0x000E_0303); // (0 << 24) | (14 << 16) | (3 << 8) | 3
     }
 
     #[test]
