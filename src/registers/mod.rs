@@ -506,6 +506,168 @@ impl CiTrec {
     bit!(tx_bus_off, with_tx_bus_off, 21, "`TXBO`");
 }
 
+/// `CiNBTCFG` — nominal bit timing (0x004). All fields stored as value − 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct CiNbtCfg(/** Raw 32-bit register value. */ pub u32);
+
+impl CiNbtCfg {
+    /// Builds the register from human values: `brp: 1..=256`,
+    /// `tseg1: 2..=256`, `tseg2: 1..=128`, `sjw: 1..=128` (time quanta).
+    /// Callers validate ranges (see `config::NominalBitTiming::validate`).
+    pub const fn new(brp: u16, tseg1: u16, tseg2: u16, sjw: u16) -> Self {
+        Self(
+            (((brp - 1) as u32) << 24)
+                | (((tseg1 - 1) as u32) << 16)
+                | (((tseg2 - 1) as u32) << 8)
+                | ((sjw - 1) as u32),
+        )
+    }
+}
+
+/// `CiDBTCFG` — data bit timing (0x008). All fields stored as value − 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct CiDbtCfg(/** Raw 32-bit register value. */ pub u32);
+
+impl CiDbtCfg {
+    /// Builds the register from human values: `brp: 1..=256`,
+    /// `tseg1: 1..=32`, `tseg2: 1..=16`, `sjw: 1..=16` (time quanta).
+    pub const fn new(brp: u16, tseg1: u8, tseg2: u8, sjw: u8) -> Self {
+        Self(
+            (((brp - 1) as u32) << 24)
+                | (((tseg1 - 1) as u32) << 16)
+                | (((tseg2 - 1) as u32) << 8)
+                | ((sjw - 1) as u32),
+        )
+    }
+}
+
+/// Transmitter delay compensation mode (`CiTDC.TDCMOD`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum TdcMode {
+    /// TDC disabled (code 0).
+    Disabled,
+    /// Manual: SSP = TDCV + TDCO (code 1).
+    Manual,
+    /// Auto: chip measures the loop delay; SSP = measured + TDCO (code 2).
+    /// Recommended for data rates ≥ 1 Mbit/s.
+    Auto,
+}
+
+/// `CiTDC` — transmitter delay compensation (0x00C).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct CiTdc(/** Raw 32-bit register value. */ pub u32);
+
+impl CiTdc {
+    /// Sets `TDCMOD` (bits 17:16).
+    pub const fn with_mode(self, mode: TdcMode) -> Self {
+        let code = match mode {
+            TdcMode::Disabled => 0,
+            TdcMode::Manual => 1,
+            TdcMode::Auto => 2,
+        };
+        Self((self.0 & !(0b11 << 16)) | (code << 16))
+    }
+    /// Sets `TDCO` (bits 14:8): SSP offset in SYSCLK cycles,
+    /// two's complement `-64..=63`.
+    pub const fn with_tdco(self, tdco: i8) -> Self {
+        Self((self.0 & !(0x7F << 8)) | (((tdco as u32) & 0x7F) << 8))
+    }
+    bit!(
+        edge_filter,
+        with_edge_filter,
+        25,
+        "`EDGFLTEN` (edge filtering, recommended for FD)"
+    );
+}
+
+/// `CiFIFOCONm` — FIFO control (0x05C + 12·(m−1)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct CiFifoCon(/** Raw 32-bit register value. */ pub u32);
+
+impl CiFifoCon {
+    /// Value for byte 1 (bits 15:8) setting `UINC` only — used to pop an
+    /// RX FIFO element without touching configuration bits.
+    pub const CON_BYTE1_UINC: u8 = 0x01;
+    /// Value for byte 1 setting `UINC | TXREQ` — used to queue and flush a
+    /// TX FIFO element.
+    pub const CON_BYTE1_UINC_TXREQ: u8 = 0x03;
+
+    bit!(
+        not_full_empty_ie,
+        with_not_full_empty_ie,
+        0,
+        "`TFNRFNIE` (not-full/not-empty interrupt enable)"
+    );
+    bit!(rx_overflow_ie, with_rx_overflow_ie, 3, "`RXOVIE`");
+    bit!(rx_timestamp, with_rx_timestamp, 5, "`RXTSEN`");
+    bit!(
+        tx,
+        with_tx,
+        7,
+        "`TXEN` (1 = transmit FIFO, 0 = receive FIFO)"
+    );
+    bit!(
+        uinc,
+        with_uinc,
+        8,
+        "`UINC` (increment head/tail; write-only)"
+    );
+    bit!(
+        txreq,
+        with_txreq,
+        9,
+        "`TXREQ` (request transmission; TX FIFOs)"
+    );
+    bit!(freset, with_freset, 10, "`FRESET` (FIFO reset)");
+
+    /// Sets `FSIZE` (bits 28:24): FIFO depth in messages, `1..=32`,
+    /// stored as depth − 1.
+    pub const fn with_fifo_size(self, depth: u8) -> Self {
+        Self((self.0 & !(0x1F << 24)) | ((((depth - 1) as u32) & 0x1F) << 24))
+    }
+    /// Sets `PLSIZE` (bits 31:29).
+    pub const fn with_payload_size(self, p: PayloadSize) -> Self {
+        Self((self.0 & !(0b111 << 29)) | (p.plsize_code() << 29))
+    }
+}
+
+/// `CiFIFOSTAm` — FIFO status (0x060 + 12·(m−1)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct CiFifoSta(/** Raw 32-bit register value. */ pub u32);
+
+impl CiFifoSta {
+    bit!(
+        not_full_or_not_empty,
+        with_not_full_or_not_empty,
+        0,
+        "`TFNRFNIF` (TX: not full / RX: not empty)"
+    );
+    bit!(
+        rx_overflow,
+        with_rx_overflow,
+        3,
+        "`RXOVIF` (RX FIFO overflowed; a message was lost)"
+    );
+    bit!(
+        tx_attempts_exhausted,
+        with_tx_attempts_exhausted,
+        4,
+        "`TXATIF`"
+    );
+
+    /// `FIFOCI` (bits 12:8): current FIFO message index. Subject to the
+    /// MCP2517FD corrupt-read erratum — do not build protocol logic on it.
+    pub const fn fifo_index(self) -> u8 {
+        ((self.0 >> 8) & 0x1F) as u8
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -576,5 +738,53 @@ mod tests {
         assert_eq!(PayloadSize::B8.plsize_code(), 0);
         assert_eq!(PayloadSize::B64.plsize_code(), 7);
         assert_eq!(PayloadSize::from_code(5), PayloadSize::B32);
+    }
+
+    #[test]
+    fn nbtcfg_stores_minus_one() {
+        // 40 MHz, 500 kbit/s, 80 TQ: brp=1, tseg1=63, tseg2=16, sjw=16.
+        let r = CiNbtCfg::new(1, 63, 16, 16);
+        // BRP bits 31:24, TSEG1 23:16, TSEG2 14:8, SJW 6:0 — all value-1.
+        assert_eq!(r.0, (0u32 << 24) | (62 << 16) | (15 << 8) | 15);
+    }
+
+    #[test]
+    fn dbtcfg_stores_minus_one() {
+        // 2 Mbit/s data phase, 20 TQ: brp=1, tseg1=15, tseg2=4, sjw=4.
+        let r = CiDbtCfg::new(1, 15, 4, 4);
+        assert_eq!(r.0, (0u32 << 24) | (14 << 16) | (3 << 8) | 3);
+    }
+
+    #[test]
+    fn tdc_auto_mode() {
+        let r = CiTdc(0)
+            .with_mode(TdcMode::Auto)
+            .with_tdco(15)
+            .with_edge_filter(true);
+        // TDCMOD bits 17:16 = 0b10, TDCO bits 14:8 (two's complement), EDGFLTEN bit 25.
+        assert_eq!(r.0, (0b10 << 16) | (15 << 8) | (1 << 25));
+        // Negative TDCO is 7-bit two's complement.
+        assert_eq!(CiTdc(0).with_tdco(-1).0, 0x7F << 8);
+    }
+
+    #[test]
+    fn fifocon_fields() {
+        let r = CiFifoCon(0)
+            .with_tx(true)
+            .with_fifo_size(4)
+            .with_payload_size(PayloadSize::B64)
+            .with_freset(true);
+        assert_eq!(r.0, (1 << 7) | (1 << 10) | (3 << 24) | (7 << 29));
+        let rx = CiFifoCon(0)
+            .with_not_full_empty_ie(true)
+            .with_rx_overflow_ie(true);
+        assert_eq!(rx.0, 1 | (1 << 3));
+    }
+
+    #[test]
+    fn fifosta_fields() {
+        assert!(CiFifoSta(1).not_full_or_not_empty());
+        assert!(CiFifoSta(1 << 3).rx_overflow());
+        assert_eq!(CiFifoSta(0x0500).fifo_index(), 5);
     }
 }
