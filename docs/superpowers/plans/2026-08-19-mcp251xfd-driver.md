@@ -225,6 +225,8 @@ git commit -m "feat: crate scaffolding, features, and error types"
 ```
 (`Cargo.lock` is gitignored — this is a library crate.)
 
+> **✅ Task 1 summary (done 2026-08-19, commit `b38a823`):** Crate renamed to `mcp251xfd` with the full feature/dependency set; `src/lib.rs` (`no_std` + `deny(missing_docs)`) and `src/error.rs` (`Error<E>`, `ConfigError`, Display + `core::error::Error`) landed exactly as specified, TDD order followed. `cargo test`, `--all-features`, and `clippy -D warnings` all clean. Review: spec ✅, quality approved. Known deferred minor: two intra-doc links (`max_spi_hz`, `config::Config`) are forward references that resolve when Tasks 8/14 land.
+
 ---
 
 ### Task 2: Registers core — addresses, `Fifo`/`Filter`/`PayloadSize`, `OSC`, `CiCON`, `CiINT`, `CiVEC`, `CiTREC`
@@ -243,7 +245,7 @@ git commit -m "feat: crate scaffolding, features, and error types"
   - `Variant` enum { `Mcp2517Fd`, `Mcp2518Fd` }
   - Register newtypes `Osc`, `CiCon`, `CiInt`, `CiVec`, `CiTrec` — each `pub struct X(pub u32)` with the accessors listed in the code below
 
-- [ ] **Step 1: Create `src/registers/mod.rs` with the test module first**
+- [x] **Step 1: Create `src/registers/mod.rs` with the test module first**
 
 ```rust
 #[cfg(test)]
@@ -320,12 +322,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Add `pub mod registers;` to `src/lib.rs`, run tests to verify failure**
+- [x] **Step 2: Add `pub mod registers;` to `src/lib.rs`, run tests to verify failure**
 
 Run: `cargo test`
 Expected: FAIL — nothing in the module is defined yet.
 
-- [ ] **Step 3: Implement the module above the tests**
+- [x] **Step 3: Implement the module above the tests**
 
 ```rust
 //! Register-level definitions for the MCP251XFD family.
@@ -719,12 +721,12 @@ impl CiTrec {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test && cargo test --all-features`
 Expected: PASS.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 cargo clippy --all-features -- -D warnings && cargo fmt

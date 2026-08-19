@@ -8,5 +8,6 @@
 #![deny(missing_docs)]
 
 mod error;
+pub mod registers;
 
 pub use error::{ConfigError, Error};
