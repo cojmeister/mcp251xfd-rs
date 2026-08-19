@@ -965,7 +965,7 @@ git commit -m "feat: bit timing, TDC, and FIFO control/status registers"
 
 **Bit layout being implemented** (family reference manual §4): T0/R0: `SID` bits 10:0 (for extended frames: ID bits 28:18), `EID` bits 28:11 (ID bits 17:0). T1: `DLC` 3:0, `IDE` 4, `RTR` 5, `BRS` 6, `FDF` 7, `ESI` 8, `SEQ` 31:9. R1: same flags, `FILHIT` bits 15:11.
 
-- [ ] **Step 1: Create `src/registers/objects.rs` with failing tests**
+- [x] **Step 1: Create `src/registers/objects.rs` with failing tests**
 
 ```rust
 #[cfg(test)]
@@ -1041,12 +1041,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Add `pub mod objects;` to `src/registers/mod.rs`, run tests to verify failure**
+- [x] **Step 2: Add `pub mod objects;` to `src/registers/mod.rs`, run tests to verify failure**
 
 Run: `cargo test`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement above the tests**
+- [x] **Step 3: Implement above the tests**
 
 ```rust
 //! Encoding and decoding of message objects in controller RAM.
@@ -1205,12 +1205,12 @@ impl RxHeader {
 
 Note: `StandardId::ZERO` and `ExtendedId::ZERO` exist in embedded-can 0.4. `dlc_to_len`'s first match arm has an unreachable inner branch — simplify to `0..=8 => dlc as usize` and keep the `_ => 8` classic fallback; write it that way from the start.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test`
 Expected: PASS (6 new tests).
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 cargo clippy --all-features -- -D warnings && cargo fmt
