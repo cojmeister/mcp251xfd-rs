@@ -943,7 +943,11 @@ git add src/registers/mod.rs
 git commit -m "feat: bit timing, TDC, and FIFO control/status registers"
 ```
 
-> **✅ Task 3 summary (done 2026-08-19, commits `c17dc75`/`ee486e7` + fix `dd010a9`):** `CiNbtCfg`, `CiDbtCfg`, `CiTdc` (+`TdcMode`), `CiFifoCon`, `CiFifoSta` landed; 13/13 tests, zero warnings including `clippy --all-targets`. Reviewer independently re-derived **every bit position against the datasheet, the C driver, and the Linux kernel driver — zero mismatches**; Microchip's own FRM 500k/2M worked example reproduces our exact test-vector register words. Two upstream-doc defects recorded: the datasheet's TDCO table contradicts its own "two's complement" statement (crate uses standard two's complement, matching both reference drivers — noted in `with_tdco` docs), and a third C-header bug (FSIZE comment). Fix round 1 addressed a clippy `identity_op` regression in tests + the TDCO doc note. Deferred minors in the SDD ledger (unmasked field packing pending Task 8 validation, `with_fifo_size(0)` underflow guard, `TDCV` setter for manual TDC, `CON_BYTE1_*` pinning test). Message object codecs (`src/registers/objects.rs`)
+> **✅ Task 3 summary (done 2026-08-19, commits `c17dc75`/`ee486e7` + fix `dd010a9`):** `CiNbtCfg`, `CiDbtCfg`, `CiTdc` (+`TdcMode`), `CiFifoCon`, `CiFifoSta` landed; 13/13 tests, zero warnings including `clippy --all-targets`. Reviewer independently re-derived **every bit position against the datasheet, the C driver, and the Linux kernel driver — zero mismatches**; Microchip's own FRM 500k/2M worked example reproduces our exact test-vector register words. Two upstream-doc defects recorded: the datasheet's TDCO table contradicts its own "two's complement" statement (crate uses standard two's complement, matching both reference drivers — noted in `with_tdco` docs), and a third C-header bug (FSIZE comment). Fix round 1 addressed a clippy `identity_op` regression in tests + the TDCO doc note. Deferred minors in the SDD ledger (unmasked field packing pending Task 8 validation, `with_fifo_size(0)` underflow guard, `TDCV` setter for manual TDC, `CON_BYTE1_*` pinning test).
+
+---
+
+### Task 4: Message object codecs (`src/registers/objects.rs`)
 
 **Files:**
 - Create: `src/registers/objects.rs`
