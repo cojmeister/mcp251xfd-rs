@@ -54,7 +54,7 @@
 **Interfaces:**
 - Produces: `Error<E>` enum and `ConfigError` enum exactly as written below. Every later task returns `Result<_, Error<SPI::Error>>` from I/O methods and maps SPI errors with `.map_err(Error::Spi)`.
 
-- [ ] **Step 1: Rewrite `Cargo.toml`**
+- [x] **Step 1: Rewrite `Cargo.toml`**
 
 ```toml
 [package]
@@ -97,7 +97,7 @@ all-features = true
 
 Note: `repository` assumes the GitHub repo will be `cojmeister/mcp251xfd`; adjust if the actual remote differs when it is created.
 
-- [ ] **Step 2: Write the failing test inside `src/error.rs`**
+- [x] **Step 2: Write the failing test inside `src/error.rs`**
 
 Create `src/error.rs` containing only the test module first:
 
@@ -117,7 +117,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Replace `src/lib.rs` and run the test to verify it fails**
+- [x] **Step 3: Replace `src/lib.rs` and run the test to verify it fails**
 
 ```rust
 //! Driver for the Microchip MCP2517FD / MCP2518FD / MCP251863 external SPI
@@ -137,7 +137,7 @@ pub use error::{ConfigError, Error};
 Run: `cargo test`
 Expected: FAIL — `Error` / `ConfigError` not defined.
 
-- [ ] **Step 4: Implement the error types above the test module in `src/error.rs`**
+- [x] **Step 4: Implement the error types above the test module in `src/error.rs`**
 
 ```rust
 //! Error types returned by the driver.
@@ -212,12 +212,12 @@ impl<E: core::fmt::Debug> core::fmt::Display for Error<E> {
 impl<E: core::fmt::Debug> core::error::Error for Error<E> {}
 ```
 
-- [ ] **Step 5: Run tests and lints to verify they pass**
+- [x] **Step 5: Run tests and lints to verify they pass**
 
 Run: `cargo test && cargo clippy --all-features -- -D warnings && cargo fmt`
 Expected: test PASSES, no warnings. (`--all-features` will pull `embedded-hal-async` and `defmt` — both must compile.)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Cargo.toml src/lib.rs src/error.rs

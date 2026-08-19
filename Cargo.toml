@@ -1,0 +1,36 @@
+[package]
+name = "mcp251xfd"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Driver for the Microchip MCP2517FD / MCP2518FD / MCP251863 external SPI CAN FD controllers"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/cojmeister/mcp251xfd"
+keywords = ["can", "can-fd", "mcp2517fd", "mcp2518fd", "embedded-hal"]
+categories = ["embedded", "no-std", "hardware-support"]
+readme = "README.md"
+# examples/rp2040 is a standalone crate (own [workspace]); it must not be
+# auto-discovered as cargo example targets of this package.
+autoexamples = false
+
+[dependencies]
+embedded-hal = "1.0"
+embedded-can = "0.4"
+embedded-hal-async = { version = "1.0", optional = true }
+maybe-async-cfg = "=0.2.4"
+defmt = { version = "0.3", optional = true }
+log = { version = "0.4", optional = true }
+
+[dev-dependencies]
+embedded-hal-mock = { version = "0.11", features = ["eh1", "embedded-hal-async"] }
+tokio = { version = "1", features = ["macros", "rt"] }
+trybuild = "1"
+
+[features]
+default = []
+async = ["dep:embedded-hal-async"]
+defmt = ["dep:defmt"]
+log = ["dep:log"]
+
+[package.metadata.docs.rs]
+all-features = true
