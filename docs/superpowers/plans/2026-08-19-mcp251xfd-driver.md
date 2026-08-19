@@ -19,7 +19,7 @@
 - Dependencies limited to: embedded-hal 1.0, embedded-can 0.4, embedded-hal-async 1.0 (optional), maybe-async-cfg (pinned `=0.2.4`), defmt (optional), log (optional). Dev-deps: embedded-hal-mock, tokio, trybuild.
 - The driver never manages CS and never depends on embassy. SPI I/O only via `SpiDevice::transaction` / its convenience methods.
 - MSRV 1.85 (edition 2024). Dual license MIT OR Apache-2.0.
-- Commit after every task (steps include the commands). Commit messages end with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
+- Commit after every task (steps include the commands). Commit messages are short one-liners — no body, no trailers (no `Co-Authored-By`).
 - Test commands: run `cargo test` (sync) and `cargo test --all-features` (adds async paths) unless a step says otherwise.
 
 ## File Map (what exists when the plan is done)
