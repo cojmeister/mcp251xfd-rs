@@ -734,6 +734,8 @@ git add src/lib.rs src/registers/mod.rs
 git commit -m "feat: register addresses and core register bitfields"
 ```
 
+> **✅ Task 2 summary (done 2026-08-19, commits `cce2cf0` + fix `84a264c`):** Full registers core landed: `addr` module, `Fifo`/`Filter`/`PayloadSize`/`OperationMode`/`Variant`, and `Osc`/`CiCon`/`CiInt`/`CiVec`/`CiTrec` bitfields; 8/8 tests, zero warnings. Reviewer independently verified **40+ addresses/bit positions against the MCP2518FD datasheet (DS20006027B) and Emandhal's `MCP251XFD.h` — zero mismatches** — and found the C driver itself wrong twice (its `ABAT` macro says bit 24, datasheet says bit 27; its 2517FD/2518FD SEQ-width constants are swapped): this crate is correct in both places. Fix round 1 addressed: doc comments on the `pub u32` tuple fields, `Default` derive removed from register newtypes (all-zero ≠ POR value — **later tasks: don't derive `Default` on register types**), IOCON byte-access hazard reworded as family-wide. Deferred minors in the SDD ledger (read-only-bit setters, missing `CiInt` bits incl. `WAKIE` for the future sleep task, `with_clko_div` raw code).
+
 ---
 
 ### Task 3: Registers — bit timing (`CiNBTCFG`, `CiDBTCFG`, `CiTDC`) and FIFO (`CiFIFOCON`, `CiFIFOSTA`)
@@ -750,7 +752,7 @@ git commit -m "feat: register addresses and core register bitfields"
   - `CiFifoCon(pub u32)` with `with_tx(bool)` (TXEN bit 7), `with_not_full_empty_ie(bool)` (bit 0), `with_rx_overflow_ie(bool)` (bit 3), `with_freset(bool)` (bit 10), `with_fifo_size(depth: u8)` (bits 28:24, stores depth − 1), `with_payload_size(PayloadSize)` (bits 31:29); byte-1 command constants `CON_BYTE1_UINC: u8 = 0x01`, `CON_BYTE1_UINC_TXREQ: u8 = 0x03`
   - `CiFifoSta(pub u32)` with `not_full_or_not_empty()` (bit 0 `TFNRFNIF`), `rx_overflow()` (bit 3), `fifo_index()` (bits 12:8 `FIFOCI`)
 
-- [ ] **Step 1: Append failing tests to the `tests` module in `src/registers/mod.rs`**
+- [x] **Step 1: Append failing tests to the `tests` module in `src/registers/mod.rs`**
 
 ```rust
     #[test]
@@ -797,12 +799,12 @@ git commit -m "feat: register addresses and core register bitfields"
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test`
 Expected: FAIL — types not defined.
 
-- [ ] **Step 3: Append implementations to `src/registers/mod.rs`**
+- [x] **Step 3: Append implementations to `src/registers/mod.rs`**
 
 ```rust
 /// `CiNBTCFG` — nominal bit timing (0x004). All fields stored as value − 1.
@@ -928,12 +930,12 @@ impl CiFifoSta {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test && cargo test --all-features`
 Expected: PASS.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 cargo clippy --all-features -- -D warnings && cargo fmt
