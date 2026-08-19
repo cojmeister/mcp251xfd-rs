@@ -257,6 +257,22 @@ pub enum Error<SpiErr> {
 - `#![no_std]`, `#![deny(missing_docs)]`, MSRV pinned (edition 2024 ⇒ 1.85+),
   dual license MIT OR Apache-2.0, docs.rs `all-features = true`
 
+### Documentation policy
+
+Every public item carries a doc comment: every public struct/enum/trait,
+**every public field** within them, every public function/method, and public
+constants/type aliases. Enforced two ways:
+
+- `#![deny(missing_docs)]` in `lib.rs` (covers public items, including
+  public fields — a missing field doc is a compile error)
+- `clippy::missing_docs_in_private_items` stays off, but private functions
+  with non-obvious behavior (bit packing, errata workarounds) get doc
+  comments as a review expectation
+
+Doc comments state units and valid ranges where applicable (e.g. `brp:
+1..=256, stored as value − 1 in the register`), and register types link the
+datasheet section they implement.
+
 ## 6. Testing
 
 ### Host tests (CI, no hardware)
