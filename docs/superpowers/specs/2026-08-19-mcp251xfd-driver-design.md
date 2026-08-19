@@ -300,6 +300,18 @@ based; embedded examples can't build for the host). Binaries:
    chip; verifies the whole stack per chip with no transceiver/bus wiring
 3. **chip-to-chip** — classic 500k and FD 500k/2M between two chips (if the
    board wires them to a common CAN bus)
+4. **multi-node** — three or more chips on the common bus, exercising CAN's
+   broadcast nature and bus sharing:
+   - broadcast: chip A transmits one frame; every other node (filters wide
+     open) must receive exactly that frame — verifies simultaneous RX across
+     shared-SPI driver instances
+   - selective delivery: nodes configured with distinct acceptance filters;
+     A sends frames with different IDs; each node must receive only its own
+     (and a broadcast ID all nodes accept)
+   - arbitration: two nodes transmit simultaneously with different-priority
+     IDs (lower ID wins); both frames must eventually arrive at a third
+     node, undamaged and in priority order — verifies lossless collision
+     handling and that TX FIFOs retry after losing arbitration
 
 ### CI (GitHub Actions)
 
