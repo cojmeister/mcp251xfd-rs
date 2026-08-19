@@ -25,7 +25,7 @@ pub mod addr {
     pub const C1TREC: u16 = 0x034;
     /// Oscillator control (MCP2000-class SFR block).
     pub const OSC: u16 = 0xE00;
-    /// I/O pin control. Byte access only (MCP2517FD erratum: multi-byte
+    /// I/O pin control. Byte access only (family erratum: multi-byte
     /// writes spanning bytes 2-3 clear LAT0/LAT1).
     pub const IOCON: u16 = 0xE04;
     /// ECC control.
@@ -337,9 +337,9 @@ macro_rules! bit {
 }
 
 /// `OSC` — oscillator control register (0xE00). Datasheet §5.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct Osc(pub u32);
+pub struct Osc(/** Raw 32-bit register value. */ pub u32);
 
 impl Osc {
     bit!(
@@ -383,9 +383,9 @@ impl Osc {
 }
 
 /// `CiCON` — CAN control register (0x000). Datasheet §3.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct CiCon(pub u32);
+pub struct CiCon(/** Raw 32-bit register value. */ pub u32);
 
 impl CiCon {
     bit!(
@@ -438,9 +438,9 @@ impl CiCon {
 }
 
 /// `CiINT` — interrupt flags (bits 15:0) and enables (bits 31:16) (0x01C).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct CiInt(pub u32);
+pub struct CiInt(/** Raw 32-bit register value. */ pub u32);
 
 impl CiInt {
     bit!(txif, with_txif, 0, "`TXIF` (any TX FIFO interrupt pending)");
@@ -465,9 +465,9 @@ impl CiInt {
 }
 
 /// `CiVEC` — interrupt vector codes (0x018).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct CiVec(pub u32);
+pub struct CiVec(/** Raw 32-bit register value. */ pub u32);
 
 impl CiVec {
     /// `ICODE` (bits 6:0): highest-priority pending interrupt code.
@@ -485,9 +485,9 @@ impl CiVec {
 }
 
 /// `CiTREC` — error counters and bus state (0x034).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct CiTrec(pub u32);
+pub struct CiTrec(/** Raw 32-bit register value. */ pub u32);
 
 impl CiTrec {
     /// Receive error counter (bits 7:0).
