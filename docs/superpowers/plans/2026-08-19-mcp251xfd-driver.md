@@ -2889,6 +2889,8 @@ git add src/driver.rs tests/driver.rs
 git commit -m "feat: operation modes, FIFO layout application, acceptance filters"
 ```
 
+> **Task 10 summary (done, commits b69942e + 099d628):** `set_mode`, `apply_layout`, `set_filter`, `disable_filter` added to the driver; 5 new byte-exact tests (incl. mode-timeout and disable_filter). Review verified everything against DS20006027B Reg 3-7/3-29/3-32 + FRM §2.1/§3.5/§6.1 + Linux + Microchip's own API — all MATCH (the filter disable-first sequence is FRM-verbatim and more robust than Microchip's API, which never disables first; RX FIFO interrupt enables are exactly Linux's choice). Three datasheet-wins rulings amended the plan's poll design: `set_mode(Sleep)` now returns immediately after the REQOP write (OPMOD reads Configuration in Sleep per Reg 3-7 Note 2, so the poll was unwinnable — Linux does the same); the poll budget rose 40→80 tries (~8 ms) because a 736-bit frame at 125 kbit/s takes 5.9 ms to drain; the FRM's via-Configuration rule for Normal↔Normal transitions is documented (misuse surfaces as ModeChangeTimeout). apply_layout docs note TXAT=0 (inert while RTXAT=0; Task 11 makes it explicit) and the freshly-reset-chip assumption. bus.rs `write_sfr8` allow removed (now consumed).
+
 ---
 
 ### Task 11: Transmit path
