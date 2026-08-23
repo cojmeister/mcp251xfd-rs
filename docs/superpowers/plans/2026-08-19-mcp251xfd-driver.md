@@ -2717,7 +2717,7 @@ git commit -m "feat: driver init sequence with variant detection and RAM echo ch
   - `async fn set_filter(&mut self, filter: Filter, matcher: FilterMatch, target: Fifo) -> Result<(), Error<SPI::Error>>` — disable byte, `FLTOBJ`, `MASK`, enable byte `0x80 | fifo`
   - `async fn disable_filter(&mut self, filter: Filter) -> Result<(), Error<SPI::Error>>`
 
-- [ ] **Step 1: Append failing tests to `tests/driver.rs`**
+- [x] **Step 1: Append failing tests to `tests/driver.rs`**
 
 Add a byte-wise write helper next to the existing ones (the bus sends the command and the value as two write operations):
 
@@ -2791,12 +2791,12 @@ fn set_filter_exact_standard_id() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test --test driver`
 Expected: FAIL — methods missing.
 
-- [ ] **Step 3: Implement in `src/driver.rs` (inside the existing `maybe` impl block)**
+- [x] **Step 3: Implement in `src/driver.rs` (inside the existing `maybe` impl block)**
 
 Add imports: `use crate::config::FilterMatch;`, `use crate::registers::ram::{FifoDirection, FifoLayout};`, `use crate::registers::{CiFifoCon, Fifo, Filter};`.
 
@@ -2876,12 +2876,12 @@ Add imports: `use crate::config::FilterMatch;`, `use crate::registers::ram::{Fif
 
 (`configure_interrupts` is referenced in a doc comment but lands in Task 12 — use plain text, not an intra-doc link, until Task 12 makes it resolvable, otherwise `cargo doc -D warnings` fails.)
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test && cargo test --all-features`
 Expected: PASS.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 cargo clippy --all-features -- -D warnings && cargo fmt

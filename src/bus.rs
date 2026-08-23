@@ -53,7 +53,7 @@ impl<SPI: SpiDevice> Bus<SPI> {
     }
 
     /// Reads one byte from an SFR address.
-    #[allow(dead_code)] // used by Task 10 (mode changes / IOCON)
+    #[allow(dead_code)] // used by Task 12 (RX/interrupt byte access)
     pub(crate) async fn read_sfr8(&mut self, addr: u16) -> Result<u8, Error<SPI::Error>> {
         let c = cmd(Opcode::Read, addr);
         let mut buf = [0u8; 1];
@@ -67,7 +67,6 @@ impl<SPI: SpiDevice> Bus<SPI> {
     /// Writes one byte to an SFR address. Also the only safe way to touch
     /// IOCON: single-byte SFR WRITE is required for IOCON on all variants,
     /// per DS20006027B Register 3-2 Note 2 / §4.1.3.
-    #[allow(dead_code)] // used by Task 10 (mode changes / IOCON)
     pub(crate) async fn write_sfr8(
         &mut self,
         addr: u16,

@@ -4,8 +4,12 @@ use crate::bus::Bus;
 #[cfg(feature = "async")]
 use crate::bus::BusAsync;
 use crate::config::Config;
+use crate::config::FilterMatch;
 use crate::error::Error;
-use crate::registers::{CiCon, CiTdc, OperationMode, Osc, TdcMode, Variant, addr};
+use crate::registers::ram::{FifoDirection, FifoLayout};
+use crate::registers::{
+    CiCon, CiFifoCon, CiTdc, Fifo, Filter, OperationMode, Osc, TdcMode, Variant, addr,
+};
 use embedded_hal::delay::DelayNs;
 use embedded_hal::spi::SpiDevice;
 #[cfg(feature = "async")]
@@ -167,5 +171,82 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         self.bus.write_sfr32(addr::C1INT, 0).await?;
 
         Ok(variant)
+    }
+
+    /// Requests an operation mode and waits (≤ ~4 ms) until the chip
+    /// reports it. Preserves the rest of `CiCON`.
+    pub async fn set_mode<D: DelayNs>(
+        &mut self,
+        mode: OperationMode,
+        delay: &mut D,
+    ) -> Result<(), Error<SPI::Error>> {
+        let con = CiCon(self.bus.read_sfr32(addr::C1CON).await?);
+        self.bus
+            .write_sfr32(addr::C1CON, con.with_req_op_mode(mode).0)
+            .await?;
+        for _ in 0..40 {
+            let now = CiCon(self.bus.read_sfr32(addr::C1CON).await?);
+            if now.op_mode() == mode {
+                return Ok(());
+            }
+            delay.delay_us(100).await;
+        }
+        Err(Error::ModeChangeTimeout)
+    }
+
+    /// Writes the FIFO configuration registers for a validated layout.
+    ///
+    /// The chip allocates RAM for the FIFOs itself; the layout only needs
+    /// to fit (guaranteed by [`FifoLayout`]'s construction). Requires
+    /// Configuration mode. RX FIFOs are configured with not-empty and
+    /// overflow interrupts enabled at the FIFO level; whether they reach
+    /// the INT pin is controlled by `configure_interrupts`.
+    pub async fn apply_layout(&mut self, layout: &FifoLayout) -> Result<(), Error<SPI::Error>> {
+        let con = CiCon(self.bus.read_sfr32(addr::C1CON).await?);
+        if con.op_mode() != OperationMode::Configuration {
+            return Err(Error::NotInConfigMode);
+        }
+        for (fifo, entry) in layout.entries() {
+            let mut reg = CiFifoCon(0)
+                .with_fifo_size(entry.depth)
+                .with_payload_size(entry.payload)
+                .with_freset(true);
+            reg = match entry.direction {
+                FifoDirection::Transmit => reg.with_tx(true),
+                FifoDirection::Receive => {
+                    reg.with_not_full_empty_ie(true).with_rx_overflow_ie(true)
+                }
+            };
+            self.bus.write_sfr32(addr::fifo_con(fifo), reg.0).await?;
+        }
+        Ok(())
+    }
+
+    /// Configures and enables an acceptance filter routing matches into
+    /// `target`. The filter is disabled while its registers are updated
+    /// (hardware requirement).
+    pub async fn set_filter(
+        &mut self,
+        filter: Filter,
+        matcher: FilterMatch,
+        target: Fifo,
+    ) -> Result<(), Error<SPI::Error>> {
+        self.bus
+            .write_sfr8(addr::flt_con_byte(filter), 0x00)
+            .await?;
+        self.bus
+            .write_sfr32(addr::flt_obj(filter), matcher.fltobj)
+            .await?;
+        self.bus
+            .write_sfr32(addr::flt_mask(filter), matcher.mask)
+            .await?;
+        self.bus
+            .write_sfr8(addr::flt_con_byte(filter), 0x80 | target.index())
+            .await
+    }
+
+    /// Disables an acceptance filter.
+    pub async fn disable_filter(&mut self, filter: Filter) -> Result<(), Error<SPI::Error>> {
+        self.bus.write_sfr8(addr::flt_con_byte(filter), 0x00).await
     }
 }

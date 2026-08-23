@@ -1,8 +1,12 @@
 //! Byte-exact integration tests for the sync driver against a mock SPI bus.
 
+use embedded_can::{Id, StandardId};
 use embedded_hal_mock::eh1::delay::NoopDelay;
 use embedded_hal_mock::eh1::spi::{Mock, Transaction};
-use mcp251xfd::{ClockConfig, Config, DataBitTiming, Error, MCP251xFd, NominalBitTiming, Variant};
+use mcp251xfd::{
+    ClockConfig, Config, DataBitTiming, Error, Fifo, FifoLayout, Filter, FilterMatch, MCP251xFd,
+    NominalBitTiming, OperationMode, PayloadSize, Variant,
+};
 
 /// One WRITE-register transaction: command word + 4 LE data bytes.
 fn w32(addr: u16, val: u32) -> Vec<Transaction<u8>> {
@@ -38,6 +42,16 @@ fn rram(addr: u16, data: &[u8]) -> Vec<Transaction<u8>> {
         Transaction::transaction_start(),
         Transaction::write_vec(vec![0x30 | (addr >> 8) as u8, (addr & 0xFF) as u8]),
         Transaction::read_vec(data.to_vec()),
+        Transaction::transaction_end(),
+    ]
+}
+
+/// One byte-wise WRITE transaction: command word + 1 data byte.
+fn w8(addr: u16, val: u8) -> Vec<Transaction<u8>> {
+    vec![
+        Transaction::transaction_start(),
+        Transaction::write_vec(vec![0x20 | (addr >> 8) as u8, (addr & 0xFF) as u8]),
+        Transaction::write_vec(vec![val]),
         Transaction::transaction_end(),
     ]
 }
@@ -128,5 +142,64 @@ fn init_fails_on_bad_echo() {
         can.init(&TEST_CONFIG, &mut NoopDelay),
         Err(Error::CommunicationCheckFailed)
     ));
+    spi.done();
+}
+
+#[test]
+fn set_mode_normal_fd() {
+    let mut e = Vec::new();
+    e.extend(r32(0x000, 0x0480_0020)); // OPMOD=Config, REQOP=Config, ISOCRC
+    e.extend(w32(0x000, 0x0080_0020)); // REQOP := NormalFd (0)
+    e.extend(r32(0x000, 0x0000_0020)); // OPMOD now NormalFd
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    can.set_mode(OperationMode::NormalFd, &mut NoopDelay)
+        .unwrap();
+    spi.done();
+}
+
+#[test]
+fn apply_layout_writes_fifo_configs() {
+    const LAYOUT: FifoLayout = FifoLayout::new()
+        .tx_fifo(Fifo::F1, PayloadSize::B64, 4)
+        .rx_fifo(Fifo::F2, PayloadSize::B64, 8);
+    let mut e = Vec::new();
+    e.extend(r32(0x000, 0x0080_0000)); // OPMOD=Config
+    // TX: PLSIZE=7<<29 | FSIZE=3<<24 | FRESET | TXEN.
+    e.extend(w32(0x05C, 0xE300_0480));
+    // RX: PLSIZE=7<<29 | FSIZE=7<<24 | FRESET | RXOVIE | TFNRFNIE.
+    e.extend(w32(0x068, 0xE700_0409));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    can.apply_layout(&LAYOUT).unwrap();
+    spi.done();
+}
+
+#[test]
+fn apply_layout_requires_config_mode() {
+    let mut e = Vec::new();
+    e.extend(r32(0x000, 0x0000_0000)); // OPMOD=NormalFd
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    let layout = FifoLayout::new().rx_fifo(Fifo::F1, PayloadSize::B8, 1);
+    assert!(matches!(
+        can.apply_layout(&layout),
+        Err(Error::NotInConfigMode)
+    ));
+    spi.done();
+}
+
+#[test]
+fn set_filter_exact_standard_id() {
+    let id = Id::Standard(StandardId::new(0x123).unwrap());
+    let mut e = Vec::new();
+    e.extend(w8(0x1D0, 0x00)); // disable filter 0 while editing
+    e.extend(w32(0x1F0, 0x0000_0123)); // FLTOBJ
+    e.extend(w32(0x1F4, 0x4000_07FF)); // MASK: SID bits + MIDE
+    e.extend(w8(0x1D0, 0x82)); // enable, point to FIFO 2
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    can.set_filter(Filter::F0, FilterMatch::exact(id), Fifo::F2)
+        .unwrap();
     spi.done();
 }
