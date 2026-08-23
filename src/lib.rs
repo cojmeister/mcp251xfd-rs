@@ -8,9 +8,13 @@
 #![deny(missing_docs)]
 
 mod bus;
+pub mod config;
 mod error;
 pub mod frame;
 pub mod registers;
 
+pub use config::{ClockConfig, Config, DataBitTiming, FilterMatch, NominalBitTiming, max_spi_hz};
 pub use error::{ConfigError, Error};
 pub use frame::{FdFrame, Frame, FrameFlags, RxFrame};
+pub use registers::ram::FifoLayout;
+pub use registers::{Fifo, Filter, OperationMode, PayloadSize, Variant};

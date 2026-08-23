@@ -2001,6 +2001,8 @@ git add src/lib.rs src/bus.rs
 git commit -m "feat: SPI bus layer with sync/async variants via maybe-async-cfg"
 ```
 
+> **Task 7 summary (done, commits 87ffbfa + 8272127):** `src/bus.rs` with `Opcode`, `cmd()`, and single-source `Bus`/`BusAsync` via maybe-async-cfg; 5 unit tests (4 sync + 1 async). Review verified all 11 SPI protocol facts against DS20006027B (Table 4-1 opcodes incl. reserved CRC 0xA/0xB/0xC, BE command word, LE register data, RAM 0x400..0xBFF word-aligned) with Linux + Emandhal cross-checks — all MATCH. The plan's merged `write_sfr8` mock expectation was split into two (mock matches per-operation; pre-flight ruling). Fix round added: IOCON byte-write doc now cites DS20006027B Reg 3-2 Note 2/§4.1.3 (binds all variants, not an MCP2517FD-only erratum), RAM end-bound debug_asserts (addr+len ≤ 0xC00 — §4.2 rollover hazard), reset() doc states §4.1.1 preconditions. `#[allow(dead_code)]` markers pending Task 9 consumption.
+
 ---
 
 ### Task 8: Configuration types and presets (`src/config.rs`)
@@ -2019,7 +2021,7 @@ git commit -m "feat: SPI bus layer with sync/async variants via maybe-async-cfg"
   - `Config { pub clock: ClockConfig, pub nominal: NominalBitTiming, pub data: Option<DataBitTiming> }` + `validate()`
   - `FilterMatch { pub fltobj: u32, pub mask: u32 }` + `exact(id: Id) -> Self`, `accept_all() -> Self`, `with_mask(id: Id, id_mask: u32) -> Self`
 
-- [ ] **Step 1: Create `src/config.rs` with failing tests**
+- [x] **Step 1: Create `src/config.rs` with failing tests**
 
 ```rust
 #[cfg(test)]
@@ -2105,12 +2107,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Wire the module and re-exports in `src/lib.rs`, run tests to verify failure**
+- [x] **Step 2: Wire the module and re-exports in `src/lib.rs`, run tests to verify failure**
 
 Run: `cargo test`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement above the tests**
+- [x] **Step 3: Implement above the tests**
 
 ```rust
 //! Driver configuration: clocks, bit timing, filters.
@@ -2349,12 +2351,12 @@ impl FilterMatch {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test && cargo test --all-features`
 Expected: PASS.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 cargo clippy --all-features -- -D warnings && cargo fmt
