@@ -1482,7 +1482,7 @@ git commit -m "feat: classic and FD frame types with embedded-can interop"
     - `const fn tx_fifo(self, Fifo, PayloadSize, depth: u8) -> Self` / `rx_fifo(...)` — panic on error; panics become **compile errors** when the layout is built in a `const`
     - `const fn total_bytes(&self) -> usize`
     - `fn entries(&self) -> impl Iterator<Item = (Fifo, FifoEntry)> + '_`
-    - `pub(crate) fn entry(&self, Fifo) -> Option<FifoEntry>`
+    - `pub fn entry(&self, Fifo) -> Option<FifoEntry>` (public — matches the canonical code block below; earlier prose said `pub(crate)`, reconciled by ruling)
 - Element size rule: `8 + payload.bytes()` bytes per message, times depth. FIFOs occupy RAM contiguously from `RAM_START` in FIFO-number order; addresses are chip-computed at runtime via `CiFIFOUAm`, so the planner only validates the total.
 
 - [x] **Step 1: Create `src/registers/ram.rs` with failing tests**
@@ -1752,6 +1752,8 @@ cargo clippy --all-features -- -D warnings && cargo fmt
 git add src/registers/mod.rs src/registers/ram.rs tests/compile_fail.rs tests/compile_fail/
 git commit -m "feat: const-fn FIFO RAM layout planner with compile-time overflow check"
 ```
+
+> **✅ Task 6 summary (done 2026-08-23, commit `dc461d8`):** `ram.rs` landed: `FifoLayout` const-fn planner (`try_*` Result builders + panicking `tx_fifo`/`rx_fifo`), `FifoEntry`, `LayoutError`; the trybuild proof pins the compile-time overflow check (`E0080: evaluation panicked: FIFO layout exceeds 2048-byte message RAM` committed as expected stderr). 27/27 tests (units + doctest + compile_fail), zero warnings. Reviewer confirmed the chip facts **exactly against `MCP251XFD.c`**: element = 8 + payload bytes (+4 only for RX timestamps, which v0.1 never enables), 2048-byte budget, contiguous FIFO-number-order allocation with total-only validation, depth 1..=32. Ruling: `entry()` stays `pub` (the brief's code block wins over its prose). No fix round needed.
 
 ---
 
