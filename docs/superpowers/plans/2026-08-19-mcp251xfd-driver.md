@@ -1459,6 +1459,8 @@ git add src/lib.rs src/frame.rs
 git commit -m "feat: classic and FD frame types with embedded-can interop"
 ```
 
+> **✅ Task 5 summary (done 2026-08-23, commits `1305805` + fix `d0ee98d`):** `frame.rs` landed: `Frame` (+ `embedded_can::Frame` impl verified against the 0.4.1 trait source), `FdFrame` with exact-DLC and padded constructors, `FrameFlags`, `RxFrame`/`ReceivedFrame`, crate-private `from_parts` for Task 12; 20/20 tests, zero warnings. **Plan deviation resolved by ruling:** `embedded_can::Id` has no `defmt::Format` (confirmed: embedded-can 0.4.1 ships no defmt feature), so the plan's derive is impossible on Id-containing types — fix round 1 added manual `defmt::Format` impls for `Frame`/`FdFrame` (printing raw ID bits) and restored the derives on `RxFrame`/`ReceivedFrame`, keeping the `defmt` feature fully functional. Deferred minors in the SDD ledger.
+
 ---
 
 ### Task 6: RAM layout planner (`src/registers/ram.rs`) with compile-time overflow check
@@ -1483,7 +1485,7 @@ git commit -m "feat: classic and FD frame types with embedded-can interop"
     - `pub(crate) fn entry(&self, Fifo) -> Option<FifoEntry>`
 - Element size rule: `8 + payload.bytes()` bytes per message, times depth. FIFOs occupy RAM contiguously from `RAM_START` in FIFO-number order; addresses are chip-computed at runtime via `CiFIFOUAm`, so the planner only validates the total.
 
-- [ ] **Step 1: Create `src/registers/ram.rs` with failing tests**
+- [x] **Step 1: Create `src/registers/ram.rs` with failing tests**
 
 ```rust
 #[cfg(test)]
@@ -1543,12 +1545,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Add `pub mod ram;` to `src/registers/mod.rs`, run tests to verify failure**
+- [x] **Step 2: Add `pub mod ram;` to `src/registers/mod.rs`, run tests to verify failure**
 
 Run: `cargo test`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement above the tests**
+- [x] **Step 3: Implement above the tests**
 
 ```rust
 //! Message RAM layout planning.
@@ -1707,12 +1709,12 @@ impl Default for FifoLayout {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test`
 Expected: PASS. (The doctest in the module header also runs and must pass — this requires `registers::ram` and its items to be `pub`, which they are.)
 
-- [ ] **Step 5: Add the trybuild compile-fail proof**
+- [x] **Step 5: Add the trybuild compile-fail proof**
 
 Create `tests/compile_fail/ram_overflow.rs`:
 
@@ -1738,12 +1740,12 @@ fn const_ram_overflow_fails_to_compile() {
 }
 ```
 
-- [ ] **Step 6: Generate the expected stderr and verify**
+- [x] **Step 6: Generate the expected stderr and verify**
 
 Run: `TRYBUILD=overwrite cargo test --test compile_fail` then `cargo test --test compile_fail`
 Expected: first run writes `tests/compile_fail/ram_overflow.stderr` (it must mention the const-eval panic "FIFO layout exceeds 2048-byte message RAM"); second run PASSES. Commit the generated `.stderr` file.
 
-- [ ] **Step 7: Lint and commit**
+- [x] **Step 7: Lint and commit**
 
 ```bash
 cargo clippy --all-features -- -D warnings && cargo fmt

@@ -1,0 +1,11 @@
+error[E0080]: evaluation panicked: FIFO layout exceeds 2048-byte message RAM
+ --> tests/compile_fail/ram_overflow.rs:5:28
+  |
+5 | const LAYOUT: FifoLayout = FifoLayout::new().rx_fifo(Fifo::F1, PayloadSize::B64, 29);
+  |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `LAYOUT` failed inside this call
+  |
+note: inside `FifoLayout::rx_fifo`
+ --> src/registers/ram.rs
+  |
+  |             Err(LayoutError::RamOverflow) => panic!("FIFO layout exceeds 2048-byte message RAM"),
+  |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the failure occurred here

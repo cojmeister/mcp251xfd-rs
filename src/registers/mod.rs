@@ -4,6 +4,7 @@
 //! (DS20006027B) and the MCP25XXFD Family Reference Manual (DS20005678E).
 
 pub mod objects;
+pub mod ram;
 
 /// Register and RAM addresses (12-bit SPI address space).
 pub mod addr {
