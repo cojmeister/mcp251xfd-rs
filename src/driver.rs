@@ -173,8 +173,23 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         Ok(variant)
     }
 
-    /// Requests an operation mode and waits (≤ ~4 ms) until the chip
+    /// Requests an operation mode and waits (≤ ~8 ms) until the chip
     /// reports it. Preserves the rest of `CiCON`.
+    ///
+    /// Requesting Sleep is fire-and-forget: per DS20006027B Register 3-7
+    /// Note 2, `OPMOD` reads Configuration while the chip is asleep, so
+    /// completion cannot be polled — and on MCP2518FD/MCP251863 Low-Power
+    /// Mode, the SPI chip-select assertion a poll would perform wakes the
+    /// device right back up. This method returns `Ok(())` right after
+    /// writing `REQOP` for that mode, without polling.
+    ///
+    /// Mode changes are otherwise not always instantaneous: the chip
+    /// finishes any bus activity in progress first (FRM §2.1/§2.1.3), and
+    /// the FSM does not support switching directly between the two Normal
+    /// modes or between the two Debug (loopback) modes (FRM §2.1.1/§2.1.2)
+    /// — such a request never completes and this method times out with
+    /// [`Error::ModeChangeTimeout`]. Go through Configuration mode first
+    /// when switching between those pairs.
     pub async fn set_mode<D: DelayNs>(
         &mut self,
         mode: OperationMode,
@@ -184,7 +199,15 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         self.bus
             .write_sfr32(addr::C1CON, con.with_req_op_mode(mode).0)
             .await?;
-        for _ in 0..40 {
+        if mode == OperationMode::Sleep {
+            return Ok(());
+        }
+        // Worst case: the bus is mid-frame when the mode change is
+        // requested. A maximum-length CAN FD frame is ~736 bits; at the
+        // slowest supported nominal bit rate (125 kbit/s) that's ~5.9 ms,
+        // so 80 tries * 100 us (~8 ms) covers it with margin (Linux's
+        // mcp251xfd driver sizes its wait the same way; Emandhal waits 7 ms).
+        for _ in 0..80 {
             let now = CiCon(self.bus.read_sfr32(addr::C1CON).await?);
             if now.op_mode() == mode {
                 return Ok(());
@@ -201,6 +224,17 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// Configuration mode. RX FIFOs are configured with not-empty and
     /// overflow interrupts enabled at the FIFO level; whether they reach
     /// the INT pin is controlled by `configure_interrupts`.
+    ///
+    /// `TXAT` (retransmission attempts, bits 22:21) is left at 0 for TX
+    /// FIFOs; that field is inert while `CiCON.RTXAT` stays clear, which is
+    /// how [`Self::init`] leaves it, so this has no effect yet — the
+    /// transmit path makes the retransmission-attempts choice explicit.
+    ///
+    /// This assumes a freshly reset/initialized chip. Calling it again with
+    /// a different layout does not clear FIFOs the previous layout
+    /// configured: their register contents are left as they were, and they
+    /// still participate in the chip's RAM address generation alongside
+    /// the new layout's FIFOs.
     pub async fn apply_layout(&mut self, layout: &FifoLayout) -> Result<(), Error<SPI::Error>> {
         let con = CiCon(self.bus.read_sfr32(addr::C1CON).await?);
         if con.op_mode() != OperationMode::Configuration {

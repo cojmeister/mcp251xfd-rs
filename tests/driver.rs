@@ -159,6 +159,23 @@ fn set_mode_normal_fd() {
 }
 
 #[test]
+fn set_mode_times_out_when_chip_never_switches() {
+    let mut e = Vec::new();
+    e.extend(r32(0x000, 0x0480_0020)); // OPMOD=Config, REQOP=Config, ISOCRC
+    e.extend(w32(0x000, 0x0080_0020)); // REQOP := NormalFd (0)
+    for _ in 0..80 {
+        e.extend(r32(0x000, 0x0080_0020)); // OPMOD stays Config; never switches
+    }
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert!(matches!(
+        can.set_mode(OperationMode::NormalFd, &mut NoopDelay),
+        Err(Error::ModeChangeTimeout)
+    ));
+    spi.done();
+}
+
+#[test]
 fn apply_layout_writes_fifo_configs() {
     const LAYOUT: FifoLayout = FifoLayout::new()
         .tx_fifo(Fifo::F1, PayloadSize::B64, 4)
@@ -201,5 +218,15 @@ fn set_filter_exact_standard_id() {
     let mut can = MCP251xFd::new(&mut spi);
     can.set_filter(Filter::F0, FilterMatch::exact(id), Fifo::F2)
         .unwrap();
+    spi.done();
+}
+
+#[test]
+fn disable_filter_writes_zero_byte() {
+    let mut e = Vec::new();
+    e.extend(w8(0x1D0, 0x00));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    can.disable_filter(Filter::F0).unwrap();
     spi.done();
 }
