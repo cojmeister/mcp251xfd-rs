@@ -8,6 +8,8 @@
 #![deny(missing_docs)]
 
 mod error;
+pub mod frame;
 pub mod registers;
 
 pub use error::{ConfigError, Error};
+pub use frame::{FdFrame, Frame, FrameFlags, RxFrame};

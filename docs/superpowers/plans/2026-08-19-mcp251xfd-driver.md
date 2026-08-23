@@ -1218,6 +1218,8 @@ git add src/registers/mod.rs src/registers/objects.rs
 git commit -m "feat: message object header codecs, ID packing, DLC mapping"
 ```
 
+> **✅ Task 4 summary (done 2026-08-23, commit `c7c3a8c`):** `objects.rs` landed: `pack_id`/`unpack_id` (the SID/EID layout swap), `TxHeader`/`RxHeader`, DLC↔length maps, `padded_dlc_len`; 18/18 tests, zero warnings. Reviewer verified every field position against **FRM DS20005678E Tables 4-1/7-1/1-1 and the C driver — zero mismatches**, recomputed all test vectors from the datasheet independently, proved the `unwrap_or` fallbacks in `unpack_id` are dead code, and reconfirmed the C header's swapped SEQ constants (our docs follow the datasheet). No fix round needed. Deferred minors in the SDD ledger (pin the unpack invariant, `dlc & 0xF` totality, SID11 doc note, boundary vectors).
+
 ---
 
 ### Task 5: Frame types (`src/frame.rs`)
@@ -1235,7 +1237,7 @@ git commit -m "feat: message object header codecs, ID packing, DLC mapping"
   - `RxFrame { pub frame: ReceivedFrame, pub timestamp: Option<u32> }` where `ReceivedFrame` is `enum { Classic(Frame), Fd(FdFrame) }` — v0.1 always sets `timestamp: None`
   - Both frame structs store `data: [u8; 8]` / `[u8; 64]` plus a length; `data()` returns the valid slice
 
-- [ ] **Step 1: Create `src/frame.rs` with failing tests**
+- [x] **Step 1: Create `src/frame.rs` with failing tests**
 
 ```rust
 #[cfg(test)]
@@ -1272,12 +1274,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Wire the module in `src/lib.rs`, run tests to verify failure**
+- [x] **Step 2: Wire the module in `src/lib.rs`, run tests to verify failure**
 
 Run: `cargo test`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement above the tests**
+- [x] **Step 3: Implement above the tests**
 
 ```rust
 //! CAN frame types.
@@ -1444,12 +1446,12 @@ impl FdFrame {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test && cargo test --all-features`
 Expected: PASS. (`from_parts` is unused for now — mark both `#[allow(dead_code)]` with a `// used by driver RX path (Task 12)` comment, and remove the allows in Task 12.)
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 cargo clippy --all-features -- -D warnings && cargo fmt
