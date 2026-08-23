@@ -90,6 +90,31 @@ impl Frame {
     }
 }
 
+#[cfg(feature = "defmt")]
+// Manual impl because `embedded_can::Id` lacks `defmt::Format`.
+impl defmt::Format for Frame {
+    fn format(&self, fmt: defmt::Formatter) {
+        match self.id {
+            Id::Standard(sid) => defmt::write!(
+                fmt,
+                "Frame {{ id: Standard({=u16:#x}), dlc: {=u8}, rtr: {=bool}, data: {=[u8]:#02x} }}",
+                sid.as_raw(),
+                self.dlc,
+                self.rtr,
+                self.data()
+            ),
+            Id::Extended(eid) => defmt::write!(
+                fmt,
+                "Frame {{ id: Extended({=u32:#x}), dlc: {=u8}, rtr: {=bool}, data: {=[u8]:#02x} }}",
+                eid.as_raw(),
+                self.dlc,
+                self.rtr,
+                self.data()
+            ),
+        }
+    }
+}
+
 /// Per-frame CAN FD flags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -164,8 +189,36 @@ impl FdFrame {
     }
 }
 
+#[cfg(feature = "defmt")]
+// Manual impl because `embedded_can::Id` lacks `defmt::Format`.
+impl defmt::Format for FdFrame {
+    fn format(&self, fmt: defmt::Formatter) {
+        match self.id {
+            Id::Standard(sid) => defmt::write!(
+                fmt,
+                "FdFrame {{ id: Standard({=u16:#x}), len: {=u8}, brs: {=bool}, esi: {=bool}, data: {=[u8]:#02x} }}",
+                sid.as_raw(),
+                self.len,
+                self.flags.brs,
+                self.flags.esi,
+                self.data()
+            ),
+            Id::Extended(eid) => defmt::write!(
+                fmt,
+                "FdFrame {{ id: Extended({=u32:#x}), len: {=u8}, brs: {=bool}, esi: {=bool}, data: {=[u8]:#02x} }}",
+                eid.as_raw(),
+                self.len,
+                self.flags.brs,
+                self.flags.esi,
+                self.data()
+            ),
+        }
+    }
+}
+
 /// A frame received from an RX FIFO.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct RxFrame {
     /// The received frame.
     pub frame: ReceivedFrame,
@@ -176,6 +229,7 @@ pub struct RxFrame {
 
 /// Classic or FD payload of a received frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum ReceivedFrame {
     /// A classic CAN 2.0 frame.
     Classic(Frame),
