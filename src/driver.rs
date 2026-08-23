@@ -59,16 +59,26 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
 
     /// Sends the RESET instruction. The chip returns to Configuration mode
     /// with default registers.
+    ///
+    /// Per DS20006027B §4.1.1: should only be issued while the device is in
+    /// Configuration mode, and it does not change Message Memory (RAM).
     pub async fn reset(&mut self) -> Result<(), Error<SPI::Error>> {
         self.bus.reset().await
     }
 
     /// Resets and fully initializes the chip; returns the detected variant.
     ///
-    /// Sequence (see spec §3.5): reset, RAM echo check, oscillator setup and
-    /// ready-poll, variant detection via `OSC.LPMEN`, message-RAM zero fill,
-    /// bit timing, `CiCON` (ISO CRC, stays in Configuration mode), interrupts
-    /// cleared. Configure FIFOs/filters afterwards, then switch modes.
+    /// Sequence (per DS20006027B §4.1.1 and the oscillator/RAM init flow):
+    /// reset, RAM echo check, oscillator setup and ready-poll, variant
+    /// detection via `OSC.LPMEN`, message-RAM zero fill, bit timing, `CiCON`
+    /// (ISO CRC, stays in Configuration mode), interrupts cleared. Configure
+    /// FIFOs/filters afterwards, then switch modes.
+    ///
+    /// The initial RESET assumes the chip is already in Configuration mode
+    /// (DS20006027B §4.1.1) — true right after power-on. On a warm restart
+    /// where the chip was left in another mode, RESET is not guaranteed to
+    /// take effect; power-cycle the chip or otherwise ensure Configuration
+    /// mode before calling this.
     pub async fn init<D: DelayNs>(
         &mut self,
         config: &Config,
@@ -76,7 +86,8 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     ) -> Result<Variant, Error<SPI::Error>> {
         config.validate().map_err(Error::InvalidConfig)?;
         self.bus.reset().await?;
-        delay.delay_us(700).await;
+        // TOSCSTAB: oscillator stabilization time (DS20006027B Table 7-3).
+        delay.delay_us(3000).await;
 
         // SPI sanity check: catches wiring and over-spec SPI clocks early.
         const ECHO: u32 = 0xAA55_AA55;
@@ -119,7 +130,10 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         self.bus.write_sfr32(addr::OSC, osc.0).await?;
         self.seq_mask = variant.seq_mask();
 
-        // Zero the message RAM (ECC stays disabled in this version).
+        // Zero the message RAM (ECC stays disabled in this version, but the
+        // zero-fill also seeds valid ECC parity so a later ECC enable
+        // doesn't see uninitialized words — the reason the Linux driver
+        // does this too).
         let zeros = [0u8; 64];
         let mut a = addr::RAM_START;
         while (a as usize) < addr::RAM_START as usize + addr::RAM_SIZE {
