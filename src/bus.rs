@@ -46,6 +46,9 @@ pub(crate) struct Bus<SPI> {
 )]
 impl<SPI: SpiDevice> Bus<SPI> {
     /// Sends the RESET instruction.
+    ///
+    /// Per DS20006027B §4.1.1: should only be issued while the device is in
+    /// Configuration mode, and it does not change Message Memory (RAM).
     pub(crate) async fn reset(&mut self) -> Result<(), Error<SPI::Error>> {
         self.spi
             .write(&cmd(Opcode::Reset, 0))
@@ -64,8 +67,9 @@ impl<SPI: SpiDevice> Bus<SPI> {
         Ok(buf[0])
     }
 
-    /// Writes one byte to an SFR address (also the only safe way to touch
-    /// IOCON, per the MCP2517FD erratum).
+    /// Writes one byte to an SFR address. Also the only safe way to touch
+    /// IOCON: single-byte SFR WRITE is required for IOCON on all variants,
+    /// per DS20006027B Register 3-2 Note 2 / §4.1.3.
     pub(crate) async fn write_sfr8(
         &mut self,
         addr: u16,
@@ -111,6 +115,7 @@ impl<SPI: SpiDevice> Bus<SPI> {
     ) -> Result<(), Error<SPI::Error>> {
         debug_assert!(addr % 4 == 0 && buf.len() % 4 == 0);
         debug_assert!((0x400..0xC00).contains(&addr));
+        debug_assert!(addr as usize + buf.len() <= 0xC00);
         let c = cmd(Opcode::Read, addr);
         self.spi
             .transaction(&mut [Operation::Write(&c), Operation::Read(buf)])
@@ -126,6 +131,7 @@ impl<SPI: SpiDevice> Bus<SPI> {
     ) -> Result<(), Error<SPI::Error>> {
         debug_assert!(addr % 4 == 0 && data.len() % 4 == 0);
         debug_assert!((0x400..0xC00).contains(&addr));
+        debug_assert!(addr as usize + data.len() <= 0xC00);
         let c = cmd(Opcode::Write, addr);
         self.spi
             .transaction(&mut [Operation::Write(&c), Operation::Write(data)])
