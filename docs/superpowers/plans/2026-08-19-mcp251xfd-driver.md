@@ -2364,6 +2364,8 @@ git add src/lib.rs src/config.rs
 git commit -m "feat: clock and bit-timing config with 40 MHz presets, filter matches"
 ```
 
+> **Task 8 summary (done, commits 4fa0f4e + 6053d5c):** `src/config.rs` with `max_spi_hz`, `ClockConfig`, `NominalBitTiming`/`DataBitTiming` + seven 40 MHz presets, `Config`, `FilterMatch`; lib.rs re-exports wired. Review verified all six domain-fact groups against DS20006027B + FRM DS20005678E + errata DS80000792 + Linux/Emandhal: erratum SPI cap (DS80000792 item 5), OSC/PLL/SCLKDIV, bit-timing ranges (incl. NTSEG1 min 2), all presets recomputed (KBPS500/MBPS2 reproduce FRM §3.4.8's worked example verbatim), TDCO recipe, filter FLTOBJ/MASK layout — all MATCH. Ruling: kept FRM-literal `tdco() = brp*tseg1` (Table 3-5 says 15; mainline Linux computes 16 — one-cycle discrepancy now documented). Fix round corrected the max_spi_hz doc (init RAM echo test cannot prove erratum compliance — needs concurrent CAN traffic) and pinned `to_reg()` against FRM Table 3-5's register words (0x003E_0F0F / 0x000E_0303).
+
 ---
 
 ### Task 9: Driver struct and init sequence (`src/driver.rs`)
