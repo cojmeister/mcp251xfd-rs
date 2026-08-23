@@ -9,11 +9,15 @@
 
 mod bus;
 pub mod config;
+mod driver;
 mod error;
 pub mod frame;
 pub mod registers;
 
 pub use config::{ClockConfig, Config, DataBitTiming, FilterMatch, NominalBitTiming, max_spi_hz};
+pub use driver::MCP251xFd;
+#[cfg(feature = "async")]
+pub use driver::MCP251xFdAsync;
 pub use error::{ConfigError, Error};
 pub use frame::{FdFrame, Frame, FrameFlags, RxFrame};
 pub use registers::ram::FifoLayout;

@@ -13,7 +13,6 @@ use embedded_hal::spi::{Operation, SpiDevice};
 use embedded_hal_async::spi::SpiDevice as SpiDeviceAsync;
 
 /// SPI instruction opcodes (high nibble of the command word).
-#[allow(dead_code)] // consumed by driver.rs (Task 9)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Opcode {
     /// Reset the chip to Configuration mode with default registers.
@@ -27,19 +26,16 @@ pub(crate) enum Opcode {
 }
 
 /// Encodes the 2-byte command word.
-#[allow(dead_code)] // consumed by driver.rs (Task 9)
 pub(crate) const fn cmd(op: Opcode, addr: u16) -> [u8; 2] {
     (((op as u16) << 12) | (addr & 0x0FFF)).to_be_bytes()
 }
 
 /// Low-level register/RAM access over a shared-bus-capable SPI device.
-#[allow(dead_code)] // consumed by driver.rs (Task 9)
 #[maybe_async_cfg::maybe(sync(keep_self), async(feature = "async"))]
 pub(crate) struct Bus<SPI> {
     pub(crate) spi: SPI,
 }
 
-#[allow(dead_code)] // consumed by driver.rs (Task 9)
 #[maybe_async_cfg::maybe(
     sync(keep_self),
     async(feature = "async", idents(SpiDevice(async = "SpiDeviceAsync")))
@@ -57,6 +53,7 @@ impl<SPI: SpiDevice> Bus<SPI> {
     }
 
     /// Reads one byte from an SFR address.
+    #[allow(dead_code)] // used by Task 10 (mode changes / IOCON)
     pub(crate) async fn read_sfr8(&mut self, addr: u16) -> Result<u8, Error<SPI::Error>> {
         let c = cmd(Opcode::Read, addr);
         let mut buf = [0u8; 1];
@@ -70,6 +67,7 @@ impl<SPI: SpiDevice> Bus<SPI> {
     /// Writes one byte to an SFR address. Also the only safe way to touch
     /// IOCON: single-byte SFR WRITE is required for IOCON on all variants,
     /// per DS20006027B Register 3-2 Note 2 / §4.1.3.
+    #[allow(dead_code)] // used by Task 10 (mode changes / IOCON)
     pub(crate) async fn write_sfr8(
         &mut self,
         addr: u16,

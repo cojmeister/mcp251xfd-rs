@@ -2385,7 +2385,7 @@ git commit -m "feat: clock and bit-timing config with 40 MHz presets, filter mat
     - `async fn init<D: DelayNs>(&mut self, config: &Config, delay: &mut D) -> Result<Variant, Error<SPI::Error>>`
   - Init sequence (exact SPI operations, in order): RESET → 700 µs delay → RAM echo test at 0xBFC → write `OSC` → poll `OSC` ready (≤ 40 tries, 100 µs apart) → write `OSC|LPMEN`, read back (variant), rewrite `OSC` → 32 × 64-byte RAM zero writes (0x400..0xC00) → `C1NBTCFG` → [`C1DBTCFG` if FD] → `C1TDC` → `C1CON` (ISO CRC, REQOP=Configuration) → `C1INT = 0`.
 
-- [ ] **Step 1: Create `tests/driver.rs` with failing tests**
+- [x] **Step 1: Create `tests/driver.rs` with failing tests**
 
 ```rust
 //! Byte-exact integration tests for the sync driver against a mock SPI bus.
@@ -2521,12 +2521,12 @@ fn init_fails_on_bad_echo() {
 
 Note: the mock helpers (`w32`, `r32`, `wram`, `rram`, `reset_txn`, `TEST_CONFIG`) are reused by Tasks 10-12 — they stay in this file, and later tests are added to the same `tests/driver.rs`.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test`
 Expected: FAIL — `MCP251xFd` does not exist.
 
-- [ ] **Step 3: Create `src/driver.rs`, wire `src/lib.rs`**
+- [x] **Step 3: Create `src/driver.rs`, wire `src/lib.rs`**
 
 ```rust
 //! The MCP251XFD driver.
@@ -2686,12 +2686,12 @@ pub use driver::MCP251xFdAsync;
 
 Zero-warning note: `seq_mask` is written here but only read from Task 11's `transmit` — until then, annotate the field with `#[allow(dead_code)] // read by transmit (Task 11)` and remove the allow in Task 11.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test && cargo test --all-features`
 Expected: PASS — the three driver tests plus all earlier tests. If the mock reports a transaction mismatch, the failure message names the first differing byte sequence: compare against the init sequence order in this task's Interfaces block before touching register values (order bugs are more likely than value bugs).
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 cargo clippy --all-features -- -D warnings && cargo fmt
