@@ -1773,7 +1773,7 @@ git commit -m "feat: const-fn FIFO RAM layout planner with compile-time overflow
 
 **maybe-async-cfg syntax** (verified against ssd1306, the reference user of this crate): `sync(keep_self)` emits an unconditional sync item under the original name; `async(feature = "async", idents(X(async = "XAsync"), ...))` emits a feature-gated copy with `Async`-suffixed name, `.await`s intact, and the listed identifier renames applied. The sync copy strips `async`/`.await`.
 
-- [ ] **Step 1: Create `src/bus.rs` with failing unit tests**
+- [x] **Step 1: Create `src/bus.rs` with failing unit tests**
 
 Unit tests live inside `src/bus.rs` (the `Bus` type is crate-private, so integration tests can't reach it; dev-dependencies are available to unit tests, and the crate is `std` under test thanks to `cfg_attr(not(test), no_std)`).
 
@@ -1864,12 +1864,12 @@ mod async_tests {
 
 Note: the mock `Mock` type implements both the sync and async `SpiDevice` traits (the async impl needs the `embedded-hal-async` mock feature, already enabled in Task 1's dev-dependency). `&mut Mock` also implements `SpiDevice`, which is why `Bus { spi: &mut spi }` works while the test retains `spi` to call `.done()`.
 
-- [ ] **Step 2: Add `mod bus;` to `src/lib.rs`, run tests to verify failure**
+- [x] **Step 2: Add `mod bus;` to `src/lib.rs`, run tests to verify failure**
 
 Run: `cargo test`
 Expected: FAIL — module contents missing.
 
-- [ ] **Step 3: Implement `src/bus.rs` above the tests**
+- [x] **Step 3: Implement `src/bus.rs` above the tests**
 
 ```rust
 //! SPI transaction layer.
@@ -1988,12 +1988,12 @@ impl<SPI: SpiDevice> Bus<SPI> {
 
 Fallback note (only if compilation of the attribute fails): the syntax above is copied from `ssd1306`'s production usage. If a `maybe-async-cfg` version mismatch rejects it, check `https://docs.rs/maybe-async-cfg` and `ssd1306` `src/lib.rs` for the current canonical form; required outcome: unconditional `Bus` (sync, `SpiDevice`), feature-gated `BusAsync` (async, `SpiDeviceAsync`), one source.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test && cargo test --all-features`
 Expected: PASS, including the `async_tests` module under `--all-features`.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 cargo clippy --all-features -- -D warnings && cargo fmt

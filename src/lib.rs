@@ -7,6 +7,7 @@
 #![cfg_attr(not(test), no_std)]
 #![deny(missing_docs)]
 
+mod bus;
 mod error;
 pub mod frame;
 pub mod registers;
