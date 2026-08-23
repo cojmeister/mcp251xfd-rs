@@ -6,11 +6,15 @@ use crate::registers::{CiDbtCfg, CiNbtCfg};
 use embedded_can::Id;
 
 /// The maximum safe SPI clock for a given SYSCLK, per the MCP2517FD
-/// "fast SPI corrupts RAM reads" erratum: `0.85 * SYSCLK / 2`.
+/// erratum DS80000792 item 5 ("SPI writes/reads of the RAM can be
+/// corrupted"): `0.85 * SYSCLK / 2`.
 ///
-/// The driver cannot observe the actual SPI clock through `SpiDevice` —
-/// configure your bus at or below this and the init-time RAM echo test
-/// will confirm it.
+/// The driver cannot observe the actual SPI clock through `SpiDevice` — you
+/// must configure your bus at or below this cap yourself. Per the erratum,
+/// corruption only occurs with simultaneous CAN bus activity during a RAM
+/// read, so the init-time RAM echo test (no bus traffic, Configuration
+/// mode) only proves wiring and byte/word order; it cannot confirm erratum
+/// compliance at your chosen SPI clock.
 pub const fn max_spi_hz(sysclk_hz: u32) -> u32 {
     (sysclk_hz / 2 / 100) * 85
 }
@@ -205,7 +209,16 @@ impl DataBitTiming {
 
     /// Transmitter delay compensation offset for auto TDC mode:
     /// `DBRP * DTSEG1`, clamped to the 7-bit signed maximum of 63
-    /// (SYSCLK cycles). Standard recipe, also used by the Linux driver.
+    /// (SYSCLK cycles).
+    ///
+    /// This is the recipe worked out in the family reference manual
+    /// (DS20005678E §3.4.8, Table 3-5: DBRP=1/DTSEG1=15 -> TDCO=15).
+    /// **Note:** mainline Linux (`can_calc_tdco`, since ~v5.16) instead
+    /// computes `DBRP * (1 + DTSEG1)` per ISO 11898-1 §11.3.3 — one
+    /// `T_SYSCLK` later than the FRM's own example (16 vs. 15 here). Older
+    /// Linux (≤ v5.15) matched the FRM. This function intentionally keeps
+    /// the FRM's `DBRP * DTSEG1` formula and value, to prevent a future
+    /// "correction" from silently changing the encoding.
     pub const fn tdco(&self) -> i8 {
         let v = self.brp as u32 * self.tseg1 as u32;
         if v > 63 { 63 } else { v as i8 }
@@ -352,6 +365,10 @@ mod tests {
             assert_eq!(40_000_000 / (p.brp as u32 * tq), rate);
             assert!(p.validate().is_ok());
         }
+        // Pin the exact register words (FRM DS20005678E Table 3-5) so a
+        // future preset or `to_reg` change can't silently drift.
+        assert_eq!(NominalBitTiming::KBPS500_40MHZ.to_reg().0, 0x003E_0F0F);
+        assert_eq!(DataBitTiming::MBPS2_40MHZ.to_reg().0, 0x000E_0303);
     }
 
     #[test]
