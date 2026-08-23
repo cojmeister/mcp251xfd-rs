@@ -2699,6 +2699,8 @@ git add src/lib.rs src/driver.rs tests/driver.rs
 git commit -m "feat: driver init sequence with variant detection and RAM echo check"
 ```
 
+> **Task 9 summary (done, commits 52813be + 20d79e1):** `src/driver.rs` with `MCP251xFd`/`MCP251xFdAsync` (`new`/`release`/`reset`/`init`), `tests/driver.rs` with byte-exact mock helpers reused by Tasks 10–12. Review verified the init sequence op-for-op and recomputed every register word against DS20006027B + Linux mcp251xfd + Emandhal — all MATCH (OSC field map, LPMEN variant detection is Linux's own technique, RAM zero-fill = ECC parity seeding, C1INT=0 mirrors Linux). Rulings: blind RESET stands per spec §3.5 (mirrors Emandhal; Linux's set-config-then-verify parked for Task 10/final review); the plan's 700 µs post-reset delay lost to the datasheet — now 3 ms per TOSCSTAB (Table 7-3), which also moves the RAM echo test outside the stabilization window. Cleanups landed: bus.rs dead_code allows narrowed to read_sfr8/write_sfr8 (Task 10 consumers), `crate::MCP251xFd::init` doc link now resolves, docs datasheet-anchored. Test helpers needed explicit `Transaction<u8>` (mock 0.11.1 has no default generic).
+
 ---
 
 ### Task 10: Mode changes, FIFO layout application, filters
