@@ -5,9 +5,13 @@ use crate::registers::objects::pack_id;
 use crate::registers::{CiDbtCfg, CiNbtCfg};
 use embedded_can::Id;
 
-/// The maximum safe SPI clock for a given SYSCLK, per the MCP2517FD
-/// erratum DS80000792 item 5 ("SPI writes/reads of the RAM can be
-/// corrupted"): `0.85 * SYSCLK / 2`.
+/// The maximum safe SPI clock for a given SYSCLK: `0.85 * SYSCLK / 2`.
+///
+/// All supported variants share this silicon erratum ("SPI writes/reads of
+/// the RAM can be corrupted"): MCP2517FD errata DS80000792 item 5,
+/// MCP2518FD errata DS80000789 (the MCP251863 uses the same die as the
+/// MCP2518FD, so the same item applies). The cap binds every variant, not
+/// just the MCP2517FD.
 ///
 /// The driver cannot observe the actual SPI clock through `SpiDevice` — you
 /// must configure your bus at or below this cap yourself. Per the erratum,
