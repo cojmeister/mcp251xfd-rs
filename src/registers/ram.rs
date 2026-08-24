@@ -59,6 +59,20 @@ pub enum LayoutError {
 
 /// A complete message-RAM layout: which FIFOs exist, their direction,
 /// payload size, and depth.
+///
+/// Allocate FIFO numbers contiguously from [`Fifo::F1`] upwards. Any subset
+/// of `F1..=F31` is accepted, but the planner's budget assumes the chip
+/// reserves RAM only for the FIFOs that are actually configured — and the
+/// address-generation formula (DS20005678E §3, "FIFO User Address",
+/// Equation 3-20) leaves the RAM occupancy of *unconfigured* FIFOs
+/// undefined. A gapped layout is therefore not validated against what the
+/// silicon does with the gaps.
+///
+/// This is a fit-checking concern only, never a corruption one: the driver
+/// computes no element addresses of its own, it reads `CiFIFOUAm` back from
+/// the chip for every access, so a disagreement surfaces as
+/// [`Error::CommunicationCheckFailed`](crate::Error::CommunicationCheckFailed)
+/// rather than as a write into the wrong FIFO.
 #[derive(Debug, Clone, Copy)]
 pub struct FifoLayout {
     entries: [Option<FifoEntry>; 31],

@@ -86,10 +86,13 @@ Not yet implemented:
 - GPIO pin (`IOCON`) and CLKO divider control
 - Interrupt sources other than RX (TEF, error, wake-up, mode-change, etc.)
 - RX timestamping (`RxFrame::timestamp` is always `None`)
+- Retransmission policy (`CiCON.RTXAT` stays 0 = unlimited retransmission, so the per-FIFO `TXAT` field is inert)
 
 ## Hardware examples
 
-Runnable examples for the RP2040 (via embassy) are planned under `examples/rp2040`.
+`examples/rp2040` is a standalone embassy crate with four runnable RP2040 binaries, used as the driver's hardware acceptance tests. `enumerate` (every chip resets, initializes, and reports its variant) and `loopback` (layout, filters, classic + FD-64 TX/RX through internal loopback) need SPI wiring only — nothing touches the CAN pins. `chip2chip` (classic, then FD-48 with bit-rate switch, between two chips) and `multinode` (broadcast delivery, per-node acceptance filters, arbitration losslessness across three nodes) additionally need transceivers and a terminated CAN bus.
+
+See [`examples/rp2040/README.md`](examples/rp2040/README.md) for the board wiring, the crystal/SPI-clock assumptions, and how to build and flash them.
 
 ## License
 

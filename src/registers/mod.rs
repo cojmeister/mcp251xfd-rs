@@ -521,6 +521,13 @@ impl CiNbtCfg {
     /// Builds the register from human values: `brp: 1..=256`,
     /// `tseg1: 2..=256`, `tseg2: 1..=128`, `sjw: 1..=128` (time quanta).
     /// Callers validate ranges (see `config::NominalBitTiming::validate`).
+    ///
+    /// # Panics
+    ///
+    /// Every field is stored as value − 1, so a `0` argument underflows:
+    /// that panics in debug builds (a compile error in a `const` context)
+    /// and wraps silently in release builds, encoding the field's maximum
+    /// instead of the value asked for. Pass validated values.
     pub const fn new(brp: u16, tseg1: u16, tseg2: u16, sjw: u16) -> Self {
         Self(
             (((brp - 1) as u32) << 24)
@@ -539,6 +546,14 @@ pub struct CiDbtCfg(/** Raw 32-bit register value. */ pub u32);
 impl CiDbtCfg {
     /// Builds the register from human values: `brp: 1..=256`,
     /// `tseg1: 1..=32`, `tseg2: 1..=16`, `sjw: 1..=16` (time quanta).
+    /// Callers validate ranges (see `config::DataBitTiming::validate`).
+    ///
+    /// # Panics
+    ///
+    /// Every field is stored as value − 1, so a `0` argument underflows:
+    /// that panics in debug builds (a compile error in a `const` context)
+    /// and wraps silently in release builds, encoding the field's maximum
+    /// instead of the value asked for. Pass validated values.
     pub const fn new(brp: u16, tseg1: u8, tseg2: u8, sjw: u8) -> Self {
         Self(
             (((brp - 1) as u32) << 24)
@@ -638,6 +653,14 @@ impl CiFifoCon {
 
     /// Sets `FSIZE` (bits 28:24): FIFO depth in messages, `1..=32`,
     /// stored as depth − 1.
+    ///
+    /// # Panics
+    ///
+    /// `depth` is stored as `depth - 1`, so `with_fifo_size(0)` underflows:
+    /// that panics in debug builds (a compile error in a `const` context)
+    /// and wraps silently in release builds to `FSIZE = 31`, i.e. a 32-deep
+    /// FIFO the caller never asked for. Pass a validated depth — the depths
+    /// in a [`FifoLayout`](crate::FifoLayout) are checked on insertion.
     pub const fn with_fifo_size(self, depth: u8) -> Self {
         Self((self.0 & !(0x1F << 24)) | ((((depth - 1) as u32) & 0x1F) << 24))
     }
