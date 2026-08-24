@@ -847,7 +847,6 @@ dependencies = [
  "embassy-sync 0.6.2",
  "embassy-time",
  "embedded-can",
- "fixed",
  "mcp251xfd",
  "panic-probe",
  "portable-atomic",

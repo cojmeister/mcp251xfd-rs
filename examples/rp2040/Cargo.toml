@@ -27,10 +27,6 @@ static_cell = "2"
 # portable-atomic needs the critical-section backend instead. Cargo unifies
 # this feature across the whole portable-atomic dependency graph.
 portable-atomic = { version = "1", features = ["critical-section"] }
-# Transitive dependency of embassy-rp (fixed-point types for PWM/PIO). Pinned
-# directly: fixed 1.31+ raises its MSRV to 1.93, newer than some supported
-# toolchains, and this crate has no workspace-level Cargo.lock to freeze it.
-fixed = "=1.30.0"
 
 [profile.release]
 debug = 2

@@ -15,8 +15,11 @@ pub type Device = SpiDevice<'static, NoopRawMutex, Spi<'static, SPI1, Async>, Ou
 
 static SPI_BUS: StaticCell<Bus> = StaticCell::new();
 
-/// 500 kbit/s nominal, 2 Mbit/s data, 40 MHz crystal. Adjust `clock` if the
-/// board's crystal is not 40 MHz.
+/// 500 kbit/s nominal, 2 Mbit/s data, 40 MHz crystal. If the board's crystal
+/// is 20 MHz instead: set `clock` to `ClockConfig::MHZ20`, hand-build
+/// `nominal`/`data` bit timings (the library ships no `*_20MHZ` presets, only
+/// `*_40MHZ`), and lower `setup`'s SPI frequency to 8_500_000 (the
+/// erratum-safe cap of 0.85 * SYSCLK / 2 at a 20 MHz SYSCLK).
 pub const CAN_CONFIG: Config = Config {
     clock: ClockConfig::MHZ40,
     nominal: NominalBitTiming::KBPS500_40MHZ,
