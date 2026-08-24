@@ -4001,7 +4001,7 @@ Run: `cd examples/rp2040 && cargo run --release --bin enumerate` (needs a debug 
 **Interfaces:**
 - Consumes: everything from Task 16's `common.rs` plus `recv_timeout` — move `recv_timeout` from `loopback.rs` into `common.rs` in this task (make it `pub`) so all three bus binaries share it, and update `loopback.rs` to call `common::recv_timeout`.
 
-- [ ] **Step 1: `chip2chip` binary**
+- [x] **Step 1: `chip2chip` binary**
 
 `examples/rp2040/src/bin/chip2chip.rs`:
 
@@ -4071,7 +4071,7 @@ async fn main(_spawner: Spawner) {
 }
 ```
 
-- [ ] **Step 2: `multinode` binary**
+- [x] **Step 2: `multinode` binary**
 
 `examples/rp2040/src/bin/multinode.rs` — three or more nodes exercising broadcast, selective delivery, and arbitration (spec §6):
 
@@ -4207,11 +4207,11 @@ async fn main(_spawner: Spawner) {
 
 Note on the arbitration check: true simultaneous start-of-frame cannot be forced over one shared SPI bus, so "high priority first" is reported as a statistic, not asserted — the hard assertion is losslessness (all 20 frames arrive intact), which is what CAN arbitration guarantees. Note `Normal20` mode is used here (classic frames only) so a scope/analyzer on the bus shows plain CAN 2.0.
 
-- [ ] **Step 3: Move `recv_timeout` into `common.rs`**
+- [x] **Step 3: Move `recv_timeout` into `common.rs`**
 
 Make it `pub async fn recv_timeout(can: &mut MCP251xFdAsync<Device>, fifo: Fifo) -> Option<RxFrame>` in `common.rs` (imports: `embassy_time::Timer`, `mcp251xfd::{Fifo, MCP251xFdAsync, RxFrame}`), delete the copy in `loopback.rs`, and call `common::recv_timeout` there. Each binary only compiles the `common` items it uses — add `#![allow(dead_code)]`? No: `common.rs` is included per-binary and unused items warn. Instead annotate `common.rs` items that not all binaries use with `#[allow(dead_code)]` — here that is unnecessary if every binary uses `setup`, `CAN_CONFIG`, `Device`, and `recv_timeout`; `enumerate` does not use `recv_timeout`, so put `#[allow(dead_code)]` on `recv_timeout` with a comment `// not used by every binary that includes common.rs`.
 
-- [ ] **Step 4: Build and commit**
+- [x] **Step 4: Build and commit**
 
 Run (from `examples/rp2040/`): `cargo build --release`
 Expected: all four binaries, zero warnings.
