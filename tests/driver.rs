@@ -1,11 +1,12 @@
 //! Byte-exact integration tests for the sync driver against a mock SPI bus.
 
+use embedded_can::Frame as _;
 use embedded_can::{Id, StandardId};
 use embedded_hal_mock::eh1::delay::NoopDelay;
 use embedded_hal_mock::eh1::spi::{Mock, Transaction};
 use mcp251xfd::{
-    ClockConfig, Config, DataBitTiming, Error, Fifo, FifoLayout, Filter, FilterMatch, MCP251xFd,
-    NominalBitTiming, OperationMode, PayloadSize, Variant,
+    ClockConfig, Config, DataBitTiming, Error, FdFrame, Fifo, FifoLayout, Filter, FilterMatch,
+    Frame, FrameFlags, MCP251xFd, NominalBitTiming, OperationMode, PayloadSize, Variant,
 };
 
 /// One WRITE-register transaction: command word + 4 LE data bytes.
@@ -228,5 +229,81 @@ fn disable_filter_writes_zero_byte() {
     let mut spi = Mock::new(&e);
     let mut can = MCP251xFd::new(&mut spi);
     can.disable_filter(Filter::F0).unwrap();
+    spi.done();
+}
+
+#[test]
+fn transmit_classic_frame() {
+    let frame = Frame::new(StandardId::new(0x123).unwrap(), &[1, 2, 3, 4]).unwrap();
+    let mut e = Vec::new();
+    // First transmit: seq 0.
+    e.extend(r32(0x060, 0x0000_0001)); // CiFIFOSTA1: not full
+    e.extend(r32(0x064, 0x0000_0000)); // CiFIFOUA1: offset 0
+    e.extend(wram(
+        0x400,
+        &[
+            0x23, 0x01, 0x00, 0x00, // T0: SID 0x123
+            0x04, 0x00, 0x00, 0x00, // T1: DLC 4, SEQ 0
+            0x01, 0x02, 0x03, 0x04, // payload
+        ],
+    ));
+    e.extend(w8(0x05D, 0x03)); // CiFIFOCON1 byte1: UINC | TXREQ
+    // Second transmit: seq increments, chip UA advanced to 0x10.
+    e.extend(r32(0x060, 0x0000_0001));
+    e.extend(r32(0x064, 0x0000_0010));
+    e.extend(wram(
+        0x410,
+        &[
+            0x23, 0x01, 0x00, 0x00, 0x04, 0x02, 0x00, 0x00, // T1: DLC 4, SEQ 1 (1 << 9)
+            0x01, 0x02, 0x03, 0x04,
+        ],
+    ));
+    e.extend(w8(0x05D, 0x03));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    can.transmit(Fifo::F1, &frame).unwrap();
+    can.transmit(Fifo::F1, &frame).unwrap();
+    spi.done();
+}
+
+#[test]
+fn transmit_full_fifo_errors() {
+    let frame = Frame::new(StandardId::new(0x123).unwrap(), &[]).unwrap();
+    let mut e = Vec::new();
+    e.extend(r32(0x060, 0x0000_0000)); // full: TFNRFNIF clear
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert!(matches!(
+        can.transmit(Fifo::F1, &frame),
+        Err(Error::TxFifoFull)
+    ));
+    spi.done();
+}
+
+#[test]
+fn transmit_fd_frame_with_brs() {
+    // 12-byte payload -> DLC 9; FDF | BRS set; payload already word-aligned.
+    let frame = FdFrame::new(
+        StandardId::new(0x7F).unwrap(),
+        &[
+            0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB,
+        ],
+        FrameFlags {
+            brs: true,
+            esi: false,
+        },
+    )
+    .unwrap();
+    let mut e = Vec::new();
+    e.extend(r32(0x060, 0x0000_0001));
+    e.extend(r32(0x064, 0x0000_0000));
+    // T1 = DLC 9 | BRS(1<<6) | FDF(1<<7) | SEQ 0 = 0xC9.
+    let mut obj = vec![0x7F, 0x00, 0x00, 0x00, 0xC9, 0x00, 0x00, 0x00];
+    obj.extend_from_slice(frame.data());
+    e.extend(wram(0x400, &obj));
+    e.extend(w8(0x05D, 0x03));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    can.transmit_fd(Fifo::F1, &frame).unwrap();
     spi.done();
 }

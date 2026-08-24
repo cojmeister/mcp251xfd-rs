@@ -6,9 +6,11 @@ use crate::bus::BusAsync;
 use crate::config::Config;
 use crate::config::FilterMatch;
 use crate::error::Error;
+use crate::frame::{FdFrame, Frame};
+use crate::registers::objects::{TxHeader, len_to_dlc};
 use crate::registers::ram::{FifoDirection, FifoLayout};
 use crate::registers::{
-    CiCon, CiFifoCon, CiTdc, Fifo, Filter, OperationMode, Osc, TdcMode, Variant, addr,
+    CiCon, CiFifoCon, CiFifoSta, CiTdc, Fifo, Filter, OperationMode, Osc, TdcMode, Variant, addr,
 };
 use embedded_hal::delay::DelayNs;
 use embedded_hal::spi::SpiDevice;
@@ -31,8 +33,9 @@ use embedded_hal_async::spi::SpiDevice as SpiDeviceAsync;
 )]
 pub struct MCP251xFd<SPI> {
     bus: Bus<SPI>,
-    // Written by `init`; read by `transmit` (Task 11).
-    #[allow(dead_code)] // read by transmit (Task 11)
+    // Next TX sequence number (echoed in the TEF); masked per variant.
+    seq: u32,
+    // Written by `init`; read by `transmit`.
     seq_mask: u32,
 }
 
@@ -52,6 +55,7 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     pub fn new(spi: SPI) -> Self {
         Self {
             bus: Bus { spi },
+            seq: 0,
             seq_mask: Variant::Mcp2517Fd.seq_mask(),
         }
     }
@@ -282,5 +286,86 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// Disables an acceptance filter.
     pub async fn disable_filter(&mut self, filter: Filter) -> Result<(), Error<SPI::Error>> {
         self.bus.write_sfr8(addr::flt_con_byte(filter), 0x00).await
+    }
+
+    /// Queues a classic CAN 2.0 frame on a transmit FIFO and requests
+    /// transmission. Non-blocking: [`Error::TxFifoFull`] when no slot is
+    /// free (wait for a TX interrupt or retry).
+    ///
+    /// Retransmission is unlimited: [`Self::init`] leaves `CiCON.RTXAT`
+    /// clear, so the per-FIFO `TXAT` field is inert and the chip keeps
+    /// retrying a frame that loses arbitration or errors out until it wins
+    /// the bus.
+    pub async fn transmit(&mut self, fifo: Fifo, frame: &Frame) -> Result<(), Error<SPI::Error>> {
+        let header = TxHeader {
+            id: frame.id(),
+            dlc: frame.dlc() as u8,
+            rtr: frame.is_remote(),
+            brs: false,
+            fdf: false,
+            esi: false,
+            seq: 0,
+        };
+        self.transmit_raw(fifo, header, frame.data()).await
+    }
+
+    /// Queues a CAN FD frame. Same contract as [`Self::transmit`].
+    pub async fn transmit_fd(
+        &mut self,
+        fifo: Fifo,
+        frame: &FdFrame,
+    ) -> Result<(), Error<SPI::Error>> {
+        let dlc = match len_to_dlc(frame.data().len(), true) {
+            Some(d) => d,
+            None => return Err(Error::InvalidPayloadLength),
+        };
+        let header = TxHeader {
+            id: frame.id(),
+            dlc,
+            rtr: false,
+            brs: frame.flags().brs,
+            fdf: true,
+            esi: frame.flags().esi,
+            seq: 0,
+        };
+        self.transmit_raw(fifo, header, frame.data()).await
+    }
+
+    /// Writes a TX message object and requests transmission.
+    ///
+    /// Checks `CiFIFOSTA.TFNRFNIF` (not-full flag) first and bails out with
+    /// [`Error::TxFifoFull`] if clear, then reads `CiFIFOUA` for the next
+    /// free slot's RAM offset, writes the header and payload there, and
+    /// sets `UINC | TXREQ` in `CiFIFOCON` byte 1 to hand the slot to the
+    /// chip and request transmission.
+    async fn transmit_raw(
+        &mut self,
+        fifo: Fifo,
+        mut header: TxHeader,
+        payload: &[u8],
+    ) -> Result<(), Error<SPI::Error>> {
+        let sta = CiFifoSta(self.bus.read_sfr32(addr::fifo_sta(fifo)).await?);
+        if !sta.not_full_or_not_empty() {
+            return Err(Error::TxFifoFull);
+        }
+        let ua = self.bus.read_sfr32(addr::fifo_ua(fifo)).await? & 0xFFF;
+
+        header.seq = self.seq & self.seq_mask;
+        self.seq = self.seq.wrapping_add(1);
+        let [t0, t1] = header.to_words();
+
+        // 8 header bytes + payload zero-padded to a 32-bit boundary.
+        let mut obj = [0u8; 72];
+        obj[0..4].copy_from_slice(&t0.to_le_bytes());
+        obj[4..8].copy_from_slice(&t1.to_le_bytes());
+        obj[8..8 + payload.len()].copy_from_slice(payload);
+        let len = 8 + payload.len().div_ceil(4) * 4;
+
+        self.bus
+            .write_ram(addr::RAM_START + ua as u16, &obj[..len])
+            .await?;
+        self.bus
+            .write_sfr8(addr::fifo_con(fifo) + 1, CiFifoCon::CON_BYTE1_UINC_TXREQ)
+            .await
     }
 }

@@ -2907,7 +2907,7 @@ git commit -m "feat: operation modes, FIFO layout application, acceptance filter
   - Both non-blocking: `Err(Error::TxFifoFull)` when the FIFO has no free slot. Sequence numbers auto-increment per driver instance, masked to the detected variant's width.
   - Struct change: add `seq: u32` (init 0 in `new`); **remove the `#[allow(dead_code)]` from `seq_mask`**.
 
-- [ ] **Step 1: Append failing tests to `tests/driver.rs`**
+- [x] **Step 1: Append failing tests to `tests/driver.rs`**
 
 ```rust
 use mcp251xfd::{FdFrame, Frame, FrameFlags};
@@ -2977,12 +2977,12 @@ fn transmit_fd_frame_with_brs() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test --test driver`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement in `src/driver.rs`**
+- [x] **Step 3: Implement in `src/driver.rs`**
 
 Struct becomes (both fields documented — they're private, but keep the comments):
 
@@ -3062,12 +3062,12 @@ pub struct MCP251xFd<SPI> {
     }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test && cargo test --all-features`
 Expected: PASS.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 cargo clippy --all-features -- -D warnings && cargo fmt
