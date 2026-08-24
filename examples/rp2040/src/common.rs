@@ -7,7 +7,10 @@ use embassy_rp::spi::{Async, Config as SpiConfig, Spi};
 use embassy_rp::Peripherals;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
-use mcp251xfd::{ClockConfig, Config, DataBitTiming, NominalBitTiming};
+use embassy_time::Timer;
+use mcp251xfd::{
+    ClockConfig, Config, DataBitTiming, Fifo, MCP251xFdAsync, NominalBitTiming, RxFrame,
+};
 use static_cell::StaticCell;
 
 pub type Bus = Mutex<NoopRawMutex, Spi<'static, SPI1, Async>>;
@@ -49,4 +52,17 @@ pub fn setup(p: Peripherals) -> [Device; 10] {
         p.PIN_15.degrade(),
     ];
     cs.map(|pin| SpiDevice::new(bus, Output::new(pin, Level::High)))
+}
+
+/// Polls an RX FIFO for up to ~100 ms.
+// not used by every binary that includes common.rs
+#[allow(dead_code)]
+pub async fn recv_timeout(can: &mut MCP251xFdAsync<Device>, fifo: Fifo) -> Option<RxFrame> {
+    for _ in 0..100 {
+        match can.receive(fifo).await {
+            Ok(rx) => return Some(rx),
+            Err(_) => Timer::after_millis(1).await,
+        }
+    }
+    None
 }
