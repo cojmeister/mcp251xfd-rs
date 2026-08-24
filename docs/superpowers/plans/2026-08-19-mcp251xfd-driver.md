@@ -3624,7 +3624,7 @@ git commit -m "docs: crate documentation, README, dual license"
 **Files:**
 - Create: `.github/workflows/ci.yml`
 
-- [ ] **Step 1: Write the workflow**
+- [x] **Step 1: Write the workflow**
 
 ```yaml
 name: CI
@@ -3689,12 +3689,12 @@ jobs:
 
 Note: the `examples` job will fail until Task 16 creates `examples/rp2040` — if CI is pushed before Task 16 lands, temporarily gate the job with `if: ${{ hashFiles('examples/rp2040/Cargo.toml') != '' }}`; remove the gate in Task 16. If the repo has no GitHub remote yet, this file simply travels with the initial push.
 
-- [ ] **Step 2: Sanity-check locally (CI's exact commands)**
+- [x] **Step 2: Sanity-check locally (CI's exact commands)**
 
 Run: `RUSTFLAGS="-D warnings" cargo test --all-features && cargo clippy --all-features -- -D warnings && cargo fmt --check && RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps`
 Expected: all pass. Also run `rustup target add thumbv6m-none-eabi` once, then `RUSTFLAGS="-D warnings" cargo build --target thumbv6m-none-eabi --all-features` — this is the proof the crate is really `no_std` (any accidental `std` use fails here).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add .github/workflows/ci.yml
