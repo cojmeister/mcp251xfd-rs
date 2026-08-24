@@ -5,8 +5,9 @@ use embedded_can::{Id, StandardId};
 use embedded_hal_mock::eh1::delay::NoopDelay;
 use embedded_hal_mock::eh1::spi::{Mock, Transaction};
 use mcp251xfd::{
-    ClockConfig, Config, DataBitTiming, Error, FdFrame, Fifo, FifoLayout, Filter, FilterMatch,
-    Frame, FrameFlags, MCP251xFd, NominalBitTiming, OperationMode, PayloadSize, Variant,
+    ClockConfig, Config, DataBitTiming, Error, Event, FdFrame, Fifo, FifoLayout, Filter,
+    FilterMatch, Frame, FrameFlags, MCP251xFd, NominalBitTiming, OperationMode, PayloadSize,
+    ReceivedFrame, Variant,
 };
 
 /// One WRITE-register transaction: command word + 4 LE data bytes.
@@ -323,5 +324,113 @@ fn transmit_rejects_out_of_range_ua() {
         can.transmit(Fifo::F1, &frame),
         Err(Error::CommunicationCheckFailed)
     ));
+    spi.done();
+}
+
+#[test]
+fn receive_classic_frame() {
+    let mut e = Vec::new();
+    e.extend(r32(0x06C, 0x0000_0001)); // CiFIFOSTA2: not empty
+    e.extend(r32(0x070, 0x0000_00A0)); // CiFIFOUA2: offset 0xA0
+    e.extend(rram(
+        0x4A0,
+        &[0x23, 0x01, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00],
+    )); // R0, R1
+    e.extend(rram(0x4A8, &[0x01, 0x02, 0x03, 0x04])); // payload
+    e.extend(w8(0x069, 0x01)); // CiFIFOCON2 byte1: UINC
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    let rx = can.receive(Fifo::F2).unwrap();
+    match rx.frame {
+        ReceivedFrame::Classic(f) => {
+            assert_eq!(f.id(), Id::Standard(StandardId::new(0x123).unwrap()));
+            assert_eq!(f.data(), &[1, 2, 3, 4]);
+        }
+        ReceivedFrame::Fd(_) => panic!("expected classic frame"),
+    }
+    assert_eq!(rx.timestamp, None);
+    spi.done();
+}
+
+#[test]
+fn receive_fd_frame() {
+    let mut e = Vec::new();
+    e.extend(r32(0x06C, 0x0000_0001));
+    e.extend(r32(0x070, 0x0000_0000));
+    // R1 = DLC 9 | BRS(1<<6) | FDF(1<<7) = 0xC9 -> 12 payload bytes.
+    e.extend(rram(
+        0x400,
+        &[0x7F, 0x00, 0x00, 0x00, 0xC9, 0x00, 0x00, 0x00],
+    ));
+    e.extend(rram(
+        0x408,
+        &[
+            0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB,
+        ],
+    ));
+    e.extend(w8(0x069, 0x01));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    let rx = can.receive(Fifo::F2).unwrap();
+    match rx.frame {
+        ReceivedFrame::Fd(f) => {
+            assert_eq!(f.data().len(), 12);
+            assert_eq!(f.data()[11], 0xAB);
+            assert!(f.flags().brs);
+        }
+        ReceivedFrame::Classic(_) => panic!("expected FD frame"),
+    }
+    spi.done();
+}
+
+#[test]
+fn receive_empty_fifo_errors() {
+    let mut e = Vec::new();
+    e.extend(r32(0x06C, 0x0000_0000));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert!(matches!(can.receive(Fifo::F2), Err(Error::RxFifoEmpty)));
+    spi.done();
+}
+
+#[test]
+fn receive_rejects_out_of_range_ua() {
+    // FIFO not empty, but CiFIFOUA reads back >= message RAM size (0x800):
+    // implausible. No RAM or CiFIFOCON traffic should follow.
+    let mut e = Vec::new();
+    e.extend(r32(0x06C, 0x0000_0001)); // not empty
+    e.extend(r32(0x070, 0x0000_0800)); // UA == RAM_SIZE: out of range
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert!(matches!(
+        can.receive(Fifo::F2),
+        Err(Error::CommunicationCheckFailed)
+    ));
+    spi.done();
+}
+
+#[test]
+fn interrupts_and_events() {
+    let mut e = Vec::new();
+    e.extend(r32(0x01C, 0x0000_0002)); // RXIF
+    e.extend(w8(0x01C, 0xFD)); // clear RXIF: write 0 to bit 1, 1 elsewhere
+    e.extend(w8(0x01D, 0xFF));
+    e.extend(w8(0x01E, 0x02)); // enables: RXIE (bit 17 -> byte2 bit 1)
+    e.extend(w8(0x01F, 0x00));
+    e.extend(r32(0x018, 0x0000_0002)); // ICODE = 2 -> FIFO 2
+    e.extend(r32(0x018, 0x0000_0040)); // ICODE = 0x40 -> none
+    e.extend(r32(0x034, 0x0021_1503)); // TREC
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    let flags = can.interrupt_flags().unwrap();
+    assert!(flags.rxif());
+    can.clear_interrupts(flags).unwrap();
+    can.configure_interrupts(mcp251xfd::registers::CiInt(0).with_rxie(true))
+        .unwrap();
+    assert_eq!(can.pending_event().unwrap(), Event::Fifo(Fifo::F2));
+    assert_eq!(can.pending_event().unwrap(), Event::None);
+    let trec = can.error_counters().unwrap();
+    assert_eq!(trec.tec(), 0x15);
+    assert!(trec.tx_bus_off());
     spi.done();
 }

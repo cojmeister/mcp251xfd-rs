@@ -53,7 +53,7 @@ impl<SPI: SpiDevice> Bus<SPI> {
     }
 
     /// Reads one byte from an SFR address.
-    #[allow(dead_code)] // used by Task 12 (RX/interrupt byte access)
+    #[allow(dead_code)] // Bus SFR API completeness; no driver caller yet.
     pub(crate) async fn read_sfr8(&mut self, addr: u16) -> Result<u8, Error<SPI::Error>> {
         let c = cmd(Opcode::Read, addr);
         let mut buf = [0u8; 1];

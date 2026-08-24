@@ -84,7 +84,6 @@ impl embedded_can::Frame for Frame {
 }
 
 impl Frame {
-    #[allow(dead_code)] // used by driver RX path (Task 12)
     pub(crate) fn from_parts(id: Id, dlc: u8, rtr: bool, data: [u8; 8]) -> Self {
         Self { id, dlc, rtr, data }
     }
@@ -178,7 +177,6 @@ impl FdFrame {
 }
 
 impl FdFrame {
-    #[allow(dead_code)] // used by driver RX path (Task 12)
     pub(crate) fn from_parts(id: Id, len: u8, flags: FrameFlags, data: [u8; 64]) -> Self {
         Self {
             id,

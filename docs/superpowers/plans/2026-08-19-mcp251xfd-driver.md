@@ -3100,7 +3100,7 @@ git commit -m "feat: classic and FD transmit with per-instance sequence numbers"
   - `async fn error_counters(&mut self) -> Result<CiTrec, Error<SPI::Error>>`
   - `Event` enum (in `driver.rs`): `None` (0x40), `Fifo(Fifo)` (codes 1..=31), `TxQueue` (0), `Error` (0x41), `WakeUp` (0x42), `ReceiveOverflow` (0x43), `AddressError` (0x44), `SystemError` (0x45), `TimeBaseOverflow` (0x46), `ModeChange` (0x47), `InvalidMessage` (0x48), `TransmitEvent` (0x49), `TransmitAttempt` (0x4A), `Unknown(u8)` — `#[non_exhaustive]`, derives Debug/Clone/Copy/PartialEq/Eq + optional defmt
 
-- [ ] **Step 1: Append failing tests to `tests/driver.rs`**
+- [x] **Step 1: Append failing tests to `tests/driver.rs`**
 
 ```rust
 use mcp251xfd::{Event, ReceivedFrame};
@@ -3186,12 +3186,12 @@ fn interrupts_and_events() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test --test driver`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement in `src/driver.rs`**
+- [x] **Step 3: Implement in `src/driver.rs`**
 
 Add imports: `use crate::frame::{FrameFlags, ReceivedFrame, RxFrame};`, `use crate::registers::objects::{dlc_to_len, RxHeader};`, `use crate::registers::{CiInt, CiTrec, CiVec};`. Define `Event` at module level (outside the `maybe` impl — it is shared by both variants):
 
@@ -3344,12 +3344,12 @@ Methods inside the `maybe` impl block:
 
 Classic-frame `len` note: `dlc_to_len(dlc, false)` caps at 8, so `Frame::from_parts(.., len as u8, ..)` stores a DLC of at most 8 even if a nonconforming node sent DLC 9..15 — document this on `receive`.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test && cargo test --all-features`
 Expected: PASS.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 cargo clippy --all-features -- -D warnings && cargo fmt

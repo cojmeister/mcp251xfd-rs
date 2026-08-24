@@ -6,11 +6,12 @@ use crate::bus::BusAsync;
 use crate::config::Config;
 use crate::config::FilterMatch;
 use crate::error::Error;
-use crate::frame::{FdFrame, Frame};
-use crate::registers::objects::{TxHeader, len_to_dlc};
+use crate::frame::{FdFrame, Frame, FrameFlags, ReceivedFrame, RxFrame};
+use crate::registers::objects::{RxHeader, TxHeader, dlc_to_len, len_to_dlc};
 use crate::registers::ram::{FifoDirection, FifoLayout};
 use crate::registers::{
-    CiCon, CiFifoCon, CiFifoSta, CiTdc, Fifo, Filter, OperationMode, Osc, TdcMode, Variant, addr,
+    CiCon, CiFifoCon, CiFifoSta, CiInt, CiTdc, CiTrec, CiVec, Fifo, Filter, OperationMode, Osc,
+    TdcMode, Variant, addr,
 };
 use embedded_hal::delay::DelayNs;
 use embedded_hal::spi::SpiDevice;
@@ -37,6 +38,67 @@ pub struct MCP251xFd<SPI> {
     seq: u32,
     // Written by `init`; read by `transmit`.
     seq_mask: u32,
+}
+
+/// Decoded `CiVEC.ICODE`: the highest-priority pending interrupt source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[non_exhaustive]
+pub enum Event {
+    /// No interrupt pending (code 0x40).
+    None,
+    /// A FIFO interrupt (codes 1..=31).
+    Fifo(Fifo),
+    /// TXQ interrupt (code 0; the TXQ is not used by this driver version).
+    TxQueue,
+    /// CAN bus error (code 0x41).
+    Error,
+    /// Wake-up (code 0x42).
+    WakeUp,
+    /// RX FIFO overflow (code 0x43).
+    ReceiveOverflow,
+    /// Illegal register/RAM address access (code 0x44).
+    AddressError,
+    /// System error, e.g. SPI underrun per erratum — re-request the
+    /// operation mode to recover (code 0x45).
+    SystemError,
+    /// Time base counter overflow (code 0x46).
+    TimeBaseOverflow,
+    /// Operation mode changed (code 0x47).
+    ModeChange,
+    /// Invalid message received (code 0x48).
+    InvalidMessage,
+    /// Transmit event FIFO (code 0x49).
+    TransmitEvent,
+    /// Transmit attempts exhausted (code 0x4A).
+    TransmitAttempt,
+    /// A code this driver version does not know.
+    Unknown(u8),
+}
+
+impl Event {
+    /// Decodes an `ICODE` value.
+    pub const fn from_icode(code: u8) -> Self {
+        match code {
+            0 => Self::TxQueue,
+            1..=31 => match Fifo::new(code) {
+                Some(f) => Self::Fifo(f),
+                None => Self::Unknown(code),
+            },
+            0x40 => Self::None,
+            0x41 => Self::Error,
+            0x42 => Self::WakeUp,
+            0x43 => Self::ReceiveOverflow,
+            0x44 => Self::AddressError,
+            0x45 => Self::SystemError,
+            0x46 => Self::TimeBaseOverflow,
+            0x47 => Self::ModeChange,
+            0x48 => Self::InvalidMessage,
+            0x49 => Self::TransmitEvent,
+            0x4A => Self::TransmitAttempt,
+            other => Self::Unknown(other),
+        }
+    }
 }
 
 #[maybe_async_cfg::maybe(
@@ -385,5 +447,109 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         self.bus
             .write_sfr8(addr::fifo_con(fifo) + 1, CiFifoCon::CON_BYTE1_UINC_TXREQ)
             .await
+    }
+
+    /// Pops one frame from a receive FIFO. Non-blocking:
+    /// [`Error::RxFifoEmpty`] when there is nothing to read.
+    ///
+    /// A classic frame whose sender used a nonconforming DLC of 9..=15 is
+    /// stored with `Frame::dlc()` capped at 8: `dlc_to_len` maps every
+    /// classic DLC above 8 to 8 payload bytes, since only that many are
+    /// ever present in the message object (DS20006027A Register 3-51).
+    pub async fn receive(&mut self, fifo: Fifo) -> Result<RxFrame, Error<SPI::Error>> {
+        let sta = CiFifoSta(self.bus.read_sfr32(addr::fifo_sta(fifo)).await?);
+        if !sta.not_full_or_not_empty() {
+            return Err(Error::RxFifoEmpty);
+        }
+        // `UA` (bits 11:0) is the register field width; validate it against
+        // the actual RAM size separately (see `transmit_raw`).
+        let ua = self.bus.read_sfr32(addr::fifo_ua(fifo)).await? & 0xFFF;
+        if ua as usize >= addr::RAM_SIZE {
+            return Err(Error::CommunicationCheckFailed);
+        }
+        let base = addr::RAM_START + ua as u16;
+
+        let mut hdr = [0u8; 8];
+        self.bus.read_ram(base, &mut hdr).await?;
+        let r0 = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]);
+        let r1 = u32::from_le_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]);
+        let header = RxHeader::from_words([r0, r1]);
+
+        let len = dlc_to_len(header.dlc, header.fdf);
+        let padded = len.div_ceil(4) * 4;
+        let mut data = [0u8; 64];
+        if padded > 0 {
+            self.bus.read_ram(base + 8, &mut data[..padded]).await?;
+        }
+        self.bus
+            .write_sfr8(addr::fifo_con(fifo) + 1, CiFifoCon::CON_BYTE1_UINC)
+            .await?;
+
+        let frame = if header.fdf {
+            ReceivedFrame::Fd(FdFrame::from_parts(
+                header.id,
+                len as u8,
+                FrameFlags {
+                    brs: header.brs,
+                    esi: header.esi,
+                },
+                data,
+            ))
+        } else {
+            let mut d8 = [0u8; 8];
+            d8.copy_from_slice(&data[..8]);
+            ReceivedFrame::Classic(Frame::from_parts(header.id, len as u8, header.rtr, d8))
+        };
+        Ok(RxFrame {
+            frame,
+            timestamp: None,
+        })
+    }
+
+    /// Reads a FIFO's status register.
+    pub async fn fifo_status(&mut self, fifo: Fifo) -> Result<CiFifoSta, Error<SPI::Error>> {
+        Ok(CiFifoSta(self.bus.read_sfr32(addr::fifo_sta(fifo)).await?))
+    }
+
+    /// Clears a FIFO's overflow (and attempt-exhausted) flags.
+    pub async fn clear_rx_overflow(&mut self, fifo: Fifo) -> Result<(), Error<SPI::Error>> {
+        self.bus.write_sfr8(addr::fifo_sta(fifo), 0x00).await
+    }
+
+    /// Reads the global interrupt flags (and enable bits).
+    pub async fn interrupt_flags(&mut self) -> Result<CiInt, Error<SPI::Error>> {
+        Ok(CiInt(self.bus.read_sfr32(addr::C1INT).await?))
+    }
+
+    /// Clears the interrupt flags set in `flags` (write-0-to-clear; only
+    /// the flag half is touched).
+    pub async fn clear_interrupts(&mut self, flags: CiInt) -> Result<(), Error<SPI::Error>> {
+        self.bus.write_sfr8(addr::C1INT, !(flags.0 as u8)).await?;
+        self.bus
+            .write_sfr8(addr::C1INT + 1, !((flags.0 >> 8) as u8))
+            .await
+    }
+
+    /// Writes the interrupt enable half of `C1INT`. Build the value with
+    /// the `with_*ie` methods, e.g. `CiInt(0).with_rxie(true)`.
+    pub async fn configure_interrupts(&mut self, enables: CiInt) -> Result<(), Error<SPI::Error>> {
+        self.bus
+            .write_sfr8(addr::C1INT + 2, (enables.0 >> 16) as u8)
+            .await?;
+        self.bus
+            .write_sfr8(addr::C1INT + 3, (enables.0 >> 24) as u8)
+            .await
+    }
+
+    /// Reads and decodes the highest-priority pending interrupt.
+    pub async fn pending_event(&mut self) -> Result<Event, Error<SPI::Error>> {
+        Ok(Event::from_icode(
+            CiVec(self.bus.read_sfr32(addr::C1VEC).await?).icode(),
+        ))
+    }
+
+    /// Reads the error counters and bus state (`CiTREC`).
+    pub async fn error_counters(&mut self) -> Result<CiTrec, Error<SPI::Error>> {
+        Ok(CiTrec(self.bus.read_sfr32(addr::C1TREC).await?))
     }
 }

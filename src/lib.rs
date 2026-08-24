@@ -15,10 +15,11 @@ pub mod frame;
 pub mod registers;
 
 pub use config::{ClockConfig, Config, DataBitTiming, FilterMatch, NominalBitTiming, max_spi_hz};
+pub use driver::Event;
 pub use driver::MCP251xFd;
 #[cfg(feature = "async")]
 pub use driver::MCP251xFdAsync;
 pub use error::{ConfigError, Error};
-pub use frame::{FdFrame, Frame, FrameFlags, RxFrame};
+pub use frame::{FdFrame, Frame, FrameFlags, ReceivedFrame, RxFrame};
 pub use registers::ram::FifoLayout;
 pub use registers::{Fifo, Filter, OperationMode, PayloadSize, Variant};
