@@ -467,6 +467,24 @@ fn receive_rejects_out_of_range_ua() {
 }
 
 #[test]
+fn receive_rejects_ua_too_close_to_ram_top_for_a_header() {
+    // Every RX object opens with an 8-byte header, so the last UA that can
+    // hold one is RAM_SIZE - 8 = 0x7F8. At 0x7F9 the header read alone would
+    // run past the end of message RAM; reject before issuing it.
+    let mut e = Vec::new();
+    e.extend(r32(0x06C, 0x0000_0001)); // not empty
+    e.extend(r32(0x070, 0x0000_07F9)); // UA + 8 > RAM_SIZE by one byte
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert!(matches!(
+        can.receive(Fifo::F2),
+        Err(Error::CommunicationCheckFailed)
+    ));
+    // `Mock::done` fails if the 8-byte header read had been issued.
+    spi.done();
+}
+
+#[test]
 fn interrupts_and_events() {
     let mut e = Vec::new();
     e.extend(r32(0x01C, 0x0000_0002)); // RXIF

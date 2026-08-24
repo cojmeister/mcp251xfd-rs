@@ -73,6 +73,10 @@ RAM reads corrupt above `0.85 * SYSCLK / 2` — 17 MHz at the recommended 40 MHz
 | `defmt` | Implements `defmt::Format` on public error, config, and frame types |
 | `log` | Depends on the `log` crate (reserved for future diagnostics) |
 
+## Minimum supported Rust version
+
+1.85 (Rust 2024 edition), covering the library build — `cargo check` / `cargo build`, with any feature combination. The development test suite needs a newer stable toolchain: its compile-fail test compares against `rustc`'s current const-eval diagnostic wording, which older compilers phrase differently.
+
 ## Status
 
 This is v0.1: reset/init, oscillator setup with variant detection, bit timing, FIFO layout, acceptance filters, classic + FD transmit, receive, interrupt flags/events, error counters, and an async `wait_rx` helper on the nINT pin.

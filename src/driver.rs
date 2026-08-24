@@ -493,10 +493,11 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
 
     /// Pops one frame from a receive FIFO. Non-blocking:
     /// [`Error::RxFifoEmpty`] when there is nothing to read. Also fails with
-    /// [`Error::CommunicationCheckFailed`] if `CiFIFOUA` reads back at or
-    /// past the end of the 2048-byte message RAM (same implausible-value
-    /// check as [`Self::transmit`]'s underlying `transmit_raw`); no RAM
-    /// access is attempted in that case.
+    /// [`Error::CommunicationCheckFailed`] if `CiFIFOUA` reads back too
+    /// close to the end of the 2048-byte message RAM to hold even a message
+    /// object's 8-byte header (same implausible-value check as
+    /// [`Self::transmit`]'s underlying `transmit_raw`); no RAM access is
+    /// attempted in that case.
     ///
     /// A classic frame whose sender used a nonconforming DLC of 9..=15 is
     /// stored with `Frame::dlc()` capped at 8: `dlc_to_len` maps every
@@ -527,9 +528,12 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
             return Err(Error::RxFifoEmpty);
         }
         // `UA` (bits 11:0) is the register field width; validate it against
-        // the actual RAM size separately (see `transmit_raw`).
+        // the actual RAM size separately (see `transmit_raw`). Every RX
+        // object starts with an 8-byte header, so a `UA` above
+        // `RAM_SIZE - 8` is implausible and would make the header read below
+        // run past the end of message RAM on its own.
         let ua = self.bus.read_sfr32(addr::fifo_ua(fifo)).await? & 0xFFF;
-        if ua as usize >= addr::RAM_SIZE {
+        if ua as usize + 8 > addr::RAM_SIZE {
             return Err(Error::CommunicationCheckFailed);
         }
         let base = addr::RAM_START + ua as u16;
