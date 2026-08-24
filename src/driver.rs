@@ -586,15 +586,33 @@ impl<SPI: SpiDeviceAsync> MCP251xFdAsync<SPI> {
     ///
     /// Level-triggered and race-free: the FIFO is checked *before* waiting
     /// on the pin, so a frame that arrives between calls is never missed.
-    /// Per DS20006027B §5 (`IOCON`, 0xE04), the INT pins are active-low and
-    /// default to push-pull (open-drain is selectable via `IOCON.INTOD`,
-    /// which this driver never sets); either way, nINT stays asserted low
-    /// as long as any enabled interrupt is pending. Requirements: the FIFO
-    /// was configured by [`Self::apply_layout`] (which sets its not-empty
-    /// interrupt) and RXIE is enabled via [`Self::configure_interrupts`];
-    /// `int_pin` is the MCU input wired to nINT (any
-    /// [`embedded_hal_async::digital::Wait`] implementation — e.g. an
-    /// embassy `Input`/`ExtiInput`).
+    /// Per DS20006027B Register 3-2 (`IOCON`, 0xE04) and §6.0.1, the INT
+    /// pins are active-low and default to push-pull (open-drain is
+    /// selectable via `IOCON.INTOD`, which this driver never sets); either
+    /// way, nINT stays asserted low as long as any enabled interrupt is
+    /// pending. Requirements: the FIFO was configured by
+    /// [`Self::apply_layout`] (which sets its not-empty interrupt) and RXIE
+    /// is enabled via [`Self::configure_interrupts`]; `int_pin` is the MCU
+    /// input wired to nINT (any [`embedded_hal_async::digital::Wait`]
+    /// implementation — e.g. an embassy `Input`/`ExtiInput`).
+    ///
+    /// # Caveats
+    ///
+    /// nINT is a single, global line: per §6.0.1 it is asserted whenever
+    /// *any* enabled interrupt source (`xIF & xIE`) is pending, not just
+    /// `fifo`'s. This method assumes the only enabled sources are ones that
+    /// draining `fifo` via [`Self::receive`] actually clears. If some other
+    /// enabled source keeps nINT low, `int_pin.wait_for_low()` returns
+    /// immediately every iteration and the loop busy-spins over SPI with no
+    /// executor yield, starving other tasks on a single-priority executor.
+    /// Reachable ways to trigger this: another RX FIFO with its not-empty
+    /// interrupt (RXIE) enabled and a frame sitting in it; `RXOVIE` enabled,
+    /// since a latched `RXOVIF` only clears via [`Self::clear_rx_overflow`],
+    /// not by draining `fifo`; or `TXIE` with a TX FIFO whose not-full
+    /// interrupt is enabled. Setting `IOCON.PM1` (Register 3-2 bit 25)
+    /// dedicates the INT1 pin to RX-only interrupts, which narrows but does
+    /// not eliminate this: INT1 is still shared across all RX FIFOs, so a
+    /// busy other RX FIFO can still hold it low.
     pub async fn wait_rx<P: embedded_hal_async::digital::Wait>(
         &mut self,
         fifo: Fifo,
