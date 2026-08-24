@@ -310,6 +310,13 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     }
 
     /// Queues a CAN FD frame. Same contract as [`Self::transmit`].
+    ///
+    /// `frame.flags().brs` works as expected (`CiCON.BRSDIS` stays clear).
+    /// `frame.flags().esi`, however, is inert: `T1.ESI` only drives the
+    /// wire ESI bit in CAN-to-CAN gateway mode (`CiCON.ESIGM` = 1, DS20006027A
+    /// Register 3-7 bit 17 and the `T1.ESI` note), and [`Self::init`] never
+    /// sets `ESIGM` — so the transmitted ESI bit reflects the controller's
+    /// own error-passive state instead of this field.
     pub async fn transmit_fd(
         &mut self,
         fifo: Fifo,
@@ -338,6 +345,12 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// free slot's RAM offset, writes the header and payload there, and
     /// sets `UINC | TXREQ` in `CiFIFOCON` byte 1 to hand the slot to the
     /// chip and request transmission.
+    ///
+    /// `CiFIFOUA` is not guaranteed to read back a valid offset while the
+    /// chip is still in Configuration mode (DS20006027A Register 3-31 Note
+    /// 1); a value at or past the end of the 2048-byte message RAM would
+    /// otherwise turn into a corrupted SPI address, so it is rejected here
+    /// as [`Error::CommunicationCheckFailed`] before any RAM access.
     async fn transmit_raw(
         &mut self,
         fifo: Fifo,
@@ -348,7 +361,12 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         if !sta.not_full_or_not_empty() {
             return Err(Error::TxFifoFull);
         }
+        // `UA` (bits 11:0) is the register field width; validate it against
+        // the actual RAM size separately.
         let ua = self.bus.read_sfr32(addr::fifo_ua(fifo)).await? & 0xFFF;
+        if ua as usize >= addr::RAM_SIZE {
+            return Err(Error::CommunicationCheckFailed);
+        }
 
         header.seq = self.seq & self.seq_mask;
         self.seq = self.seq.wrapping_add(1);

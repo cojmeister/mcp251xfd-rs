@@ -307,3 +307,21 @@ fn transmit_fd_frame_with_brs() {
     can.transmit_fd(Fifo::F1, &frame).unwrap();
     spi.done();
 }
+
+#[test]
+fn transmit_rejects_out_of_range_ua() {
+    // FIFO not full, but CiFIFOUA reads back >= message RAM size (0x800):
+    // implausible (chip possibly still in Configuration mode). No RAM or
+    // CiFIFOCON traffic should follow.
+    let frame = Frame::new(StandardId::new(0x123).unwrap(), &[1, 2, 3, 4]).unwrap();
+    let mut e = Vec::new();
+    e.extend(r32(0x060, 0x0000_0001)); // not full
+    e.extend(r32(0x064, 0x0000_0800)); // UA == RAM_SIZE: out of range
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert!(matches!(
+        can.transmit(Fifo::F1, &frame),
+        Err(Error::CommunicationCheckFailed)
+    ));
+    spi.done();
+}

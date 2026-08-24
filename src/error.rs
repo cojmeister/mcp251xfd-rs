@@ -9,7 +9,10 @@
 pub enum Error<E> {
     /// The SPI transaction itself failed.
     Spi(E),
-    /// The init-time RAM echo test (write/read `0xAA55AA55`) failed.
+    /// The chip returned an implausible value: the init-time RAM echo test
+    /// (write/read `0xAA55AA55`) failed, or a FIFO user address (`CiFIFOUA`)
+    /// was outside message RAM (the chip is possibly still in Configuration
+    /// mode, where `CiFIFOUA` is not guaranteed to read back correctly).
     ///
     /// Usually wiring, a wrong CS line, or an SPI clock above the erratum
     /// limit of `0.85 * SYSCLK / 2` (see [`crate::max_spi_hz`]).
@@ -51,9 +54,10 @@ impl<E: core::fmt::Debug> core::fmt::Display for Error<E> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Error::Spi(e) => write!(f, "SPI error: {e:?}"),
-            Error::CommunicationCheckFailed => {
-                f.write_str("RAM echo test failed (wiring or SPI clock too fast)")
-            }
+            Error::CommunicationCheckFailed => f.write_str(
+                "chip returned an implausible value (RAM echo test failed, or a FIFO user \
+                 address was outside message RAM); check wiring, CS, and SPI clock speed",
+            ),
             Error::ClockNotReady => f.write_str("oscillator/PLL not ready"),
             Error::ModeChangeTimeout => f.write_str("operation mode change timed out"),
             Error::NotInConfigMode => f.write_str("chip is not in Configuration mode"),
