@@ -450,12 +450,27 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     }
 
     /// Pops one frame from a receive FIFO. Non-blocking:
-    /// [`Error::RxFifoEmpty`] when there is nothing to read.
+    /// [`Error::RxFifoEmpty`] when there is nothing to read. Also fails with
+    /// [`Error::CommunicationCheckFailed`] if `CiFIFOUA` reads back at or
+    /// past the end of the 2048-byte message RAM (same implausible-value
+    /// check as [`Self::transmit`]'s underlying `transmit_raw`); no RAM
+    /// access is attempted in that case.
     ///
     /// A classic frame whose sender used a nonconforming DLC of 9..=15 is
     /// stored with `Frame::dlc()` capped at 8: `dlc_to_len` maps every
     /// classic DLC above 8 to 8 payload bytes, since only that many are
-    /// ever present in the message object (DS20006027A Register 3-51).
+    /// ever present in the message object (DS20006027A Table 3-6, Receive
+    /// Message Object, bits R1.3-0 `DLC`).
+    ///
+    /// This FIFO's `PLSIZE` (set via [`Self::apply_layout`]) must be at
+    /// least as large as the longest frame its filters can accept: the RX
+    /// message object only reserves `8 + PLSIZE` bytes, and a frame whose
+    /// DLC decodes to more payload than that overruns into the next FIFO
+    /// slot (`DLCMM`, DS20006027A Register 3-22 bit 31; Table 3-6 Note 1).
+    /// This driver keeps no per-FIFO `PLSIZE` record and does not guard
+    /// against it here, so bytes beyond the configured `PLSIZE` are
+    /// undefined in that case — size filters and FIFOs consistently to
+    /// avoid it.
     pub async fn receive(&mut self, fifo: Fifo) -> Result<RxFrame, Error<SPI::Error>> {
         let sta = CiFifoSta(self.bus.read_sfr32(addr::fifo_sta(fifo)).await?);
         if !sta.not_full_or_not_empty() {
@@ -521,8 +536,18 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         Ok(CiInt(self.bus.read_sfr32(addr::C1INT).await?))
     }
 
-    /// Clears the interrupt flags set in `flags` (write-0-to-clear; only
-    /// the flag half is touched).
+    /// Clears the software-clearable interrupt flags set in `flags`
+    /// (write-0-to-clear; only the flag half, `C1INT` bytes 0-1, is
+    /// touched).
+    ///
+    /// Per DS20006027A Register 3-14's attribute rows, only `IVMIF`,
+    /// `WAKIF`, `CERRIF`, `SERRIF`, `MODIF`, and `TBCIF` are actually
+    /// software-clearable (`HS/C`) this way. `TXIF`, `RXIF`, `TEFIF`,
+    /// `RXOVIF`, `TXATIF`, `SPICRCIF`, and `ECCIF` are read-only mirrors of
+    /// FIFO- or module-level state and are cleared at their source instead
+    /// — e.g. `RXOVIF`/`TXATIF` via [`Self::clear_rx_overflow`], `RXIF` by
+    /// draining the FIFO with [`Self::receive`] — so writing 0 to those
+    /// bits here is ignored/harmless.
     pub async fn clear_interrupts(&mut self, flags: CiInt) -> Result<(), Error<SPI::Error>> {
         self.bus.write_sfr8(addr::C1INT, !(flags.0 as u8)).await?;
         self.bus

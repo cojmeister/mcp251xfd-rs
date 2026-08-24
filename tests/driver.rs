@@ -413,8 +413,9 @@ fn receive_rejects_out_of_range_ua() {
 fn interrupts_and_events() {
     let mut e = Vec::new();
     e.extend(r32(0x01C, 0x0000_0002)); // RXIF
-    e.extend(w8(0x01C, 0xFD)); // clear RXIF: write 0 to bit 1, 1 elsewhere
-    e.extend(w8(0x01D, 0xFF));
+    e.extend(w8(0x01C, 0xFD)); // clear_interrupts byte0: bit 1 (RXIF) written 0 but
+    // read-only (ignored by hardware), rest written 1 (leave as-is)
+    e.extend(w8(0x01D, 0xFF)); // byte1: all bits written 1 (leave as-is)
     e.extend(w8(0x01E, 0x02)); // enables: RXIE (bit 17 -> byte2 bit 1)
     e.extend(w8(0x01F, 0x00));
     e.extend(r32(0x018, 0x0000_0002)); // ICODE = 2 -> FIFO 2
