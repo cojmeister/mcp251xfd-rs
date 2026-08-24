@@ -3357,6 +3357,8 @@ git add src/driver.rs src/frame.rs src/lib.rs tests/driver.rs
 git commit -m "feat: receive path, interrupt flags/enables, event decode, error counters"
 ```
 
+> **Task 12 summary (done, commits 65dbfd3 + 3c7686b):** `receive`/`fifo_status`/`clear_rx_overflow`/`interrupt_flags`/`clear_interrupts`/`configure_interrupts`/`pending_event`/`error_counters` plus module-level `Event` in `src/driver.rs`; `from_parts` dead-code allows removed; `ReceivedFrame`/`Event` re-exported. Review verified all 6 recomputations against DS20006027A/B — RX object layout (Table 3-6; RXTSEN never set so payload at UA+8), RX TFNRFNIF/UINC semantics (Reg 3-29/3-30), C1INT clearable-vs-read-only attribute rows (Reg 3-14), the full 14-entry ICODE map (Reg 3-13), C1TREC layout (Reg 3-20), CiFIFOSTA byte-0 write safety — all MATCH. Fixes over the plan text: `receive` gained the Task 11 UA bounds check (out-of-range CiFIFOUA ⇒ `CommunicationCheckFailed`); a bogus "Register 3-51" citation re-anchored to Table 3-6; `clear_interrupts` docs now name the actually-clearable set (IVMIF/WAKIF/CERRIF/SERRIF/MODIF/TBCIF — the rest are read-only mirrors cleared at the FIFO level); `receive` documents the DLC-vs-PLSIZE overrun caveat (DLCMM, Reg 3-22) — clamping deferred (driver keeps no per-FIFO PLSIZE record).
+
 ---
 
 ### Task 13: Async-only `wait_rx` on an interrupt pin
