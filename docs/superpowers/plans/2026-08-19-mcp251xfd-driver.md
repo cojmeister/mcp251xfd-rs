@@ -3714,7 +3714,7 @@ git commit -m "ci: tests, no_std build, clippy/fmt/docs with zero-warning policy
 
 **Interfaces:** none consumed by later crate tasks; the examples consume the whole public API and are the hardware acceptance tests. These binaries cannot run in CI — the verification step is `cargo build --release` for `thumbv6m-none-eabi`; flashing/running is done by the project owner with `probe-rs`.
 
-- [ ] **Step 1: Scaffold the crate**
+- [x] **Step 1: Scaffold the crate**
 
 `examples/rp2040/Cargo.toml` — versions below were current at plan time (embassy releases move fast; if `cargo build` reports resolution failures, bump the embassy crates to the latest set together, they version-lock each other):
 
@@ -3787,7 +3787,7 @@ fn main() {
 }
 ```
 
-- [ ] **Step 2: Shared board setup, `examples/rp2040/src/common.rs`**
+- [x] **Step 2: Shared board setup, `examples/rp2040/src/common.rs`**
 
 Included from each binary with `#[path = "../common.rs"] mod common;` (bin crates cannot share a lib without more structure; this keeps it simple).
 
@@ -3835,7 +3835,7 @@ pub fn setup(p: Peripherals) -> [Device; 10] {
 }
 ```
 
-- [ ] **Step 3: `enumerate` binary**
+- [x] **Step 3: `enumerate` binary**
 
 `examples/rp2040/src/bin/enumerate.rs`:
 
@@ -3874,7 +3874,7 @@ async fn main(_spawner: Spawner) {
 }
 ```
 
-- [ ] **Step 4: `loopback` binary**
+- [x] **Step 4: `loopback` binary**
 
 `examples/rp2040/src/bin/loopback.rs` — full per-chip driver-stack check with no transceivers/bus wiring needed:
 
@@ -3969,14 +3969,14 @@ async fn main(_spawner: Spawner) {
 }
 ```
 
-- [ ] **Step 5: Build for the target and verify**
+- [x] **Step 5: Build for the target and verify**
 
 Run (from `examples/rp2040/`): `rustup target add thumbv6m-none-eabi && cargo build --release`
 Expected: both binaries build with zero warnings. If embassy versions fail to resolve, bump them together (see Step 1 note). If `Peripherals`/pin API names differ in the resolved embassy-rp version, fix against its docs — the board wiring in this task is the source of truth.
 
 Remove the temporary `if:` gate from the CI `examples` job if Task 15 added it.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add examples/rp2040 .github/workflows/ci.yml
