@@ -4225,6 +4225,8 @@ git commit -m "feat: chip-to-chip and multi-node (broadcast/filter/arbitration) 
 
 `cargo run --release --bin chip2chip`, then `cargo run --release --bin multinode`. Expected defmt output: `classic A->B OK`, `FD-48 BRS A->B OK`; `broadcast OK`, `selective delivery OK`, `arbitration OK: all 20 frames arrived`.
 
+> **Task 17 summary (done, commits 12efebf + b11673b + fix 0ed8a49):** `chip2chip` and `multinode` binaries landed and `recv_timeout` moved into `common.rs` (pub, byte-identical body, `#[allow(dead_code)]` since `enumerate` doesn't use it). Review verified every driver-API contract the binaries depend on — Configuration-mode round-trips, `set_filter`'s self-disabling write order, `apply_layout`'s FRESET drain, `Normal20`'s classic-only rule, all 11-bit IDs — all MATCH. **Plan bug caught and fixed:** this plan's multinode Step 2 narrows node C's filters to 0x0C0/0x7DF but Step 3's arbitration drains C for IDs 0x010/0x700 — neither matches, so the plan's literal code reports `arbitration FAILED: 0/20` on correctly wired hardware (the plan's "Filters on C are still wide open" comment was false). The fix re-opens C before the round loop (Configuration → `apply_layout` → `accept_all` on F0 → `disable_filter(F1)` → Normal20), documents A's RX-FIFO headroom during the rounds (10 frames into depth 16), and fixes `recv_timeout`'s doc/attribute ordering. The multinode header's "(spec §6)" reference was dropped (code comments cite datasheets, not internal docs). All four binaries build zero-warning for `thumbv6m-none-eabi`; an `examples/rp2040/README.md` (wiring table, per-binary matrix, run instructions) was added alongside. Step 5 (on-hardware run) remains with the owner.
+
 ---
 
 ## Plan Self-Review (performed while writing)
