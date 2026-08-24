@@ -3075,6 +3075,8 @@ git add src/driver.rs tests/driver.rs
 git commit -m "feat: classic and FD transmit with per-instance sequence numbers"
 ```
 
+> **Task 11 summary (done, commits 954bad9 + e7c347d):** `transmit`/`transmit_fd`/`transmit_raw` in `src/driver.rs`; `seq` field added, `seq_mask` dead-code allow removed. Review recomputed all vectors against DS20006027A — T0/T1 layout (p.64 Table 3-5), TFNRFNIF (Reg 3-30), CiFIFOUA + 0x400 bias (Reg 3-31, Emandhal-confirmed), UINC|TXREQ one-byte write (Reg 3-29, matches Linux/Emandhal), seq masks (7/23 bits vs Linux GENMASK) — all MATCH. Two fixes over the plan text: (1) `transmit_fd` docs state `FrameFlags::esi` is inert while `CiCON.ESIGM`=0 (Reg 3-7 bit 17); (2) the plan's `& 0xFFF` UA mask lost to the datasheet — UA is validated `< RAM_SIZE` and an out-of-range read returns `CommunicationCheckFailed` (Reg 3-31 Note 1: UA unreliable in Configuration mode), with a boundary test. TXAT ruling landed as docs: RTXAT=0 ⇒ unlimited retransmission, per-FIFO TXAT inert.
+
 ---
 
 ### Task 12: Receive path, FIFO status, interrupts, events, error counters
