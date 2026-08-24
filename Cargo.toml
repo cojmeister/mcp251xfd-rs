@@ -12,6 +12,8 @@ readme = "README.md"
 # examples/rp2040 is a standalone crate (own [workspace]); it must not be
 # auto-discovered as cargo example targets of this package.
 autoexamples = false
+# Internal design/planning artefacts and CI config are not part of the crate.
+exclude = ["docs/", ".github/", ".superpowers/"]
 
 [dependencies]
 embedded-hal = "1.0"

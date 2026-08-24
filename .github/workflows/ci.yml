@@ -35,7 +35,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      - run: cargo clippy --all-features -- -D warnings
+      - run: cargo clippy --all-features --all-targets -- -D warnings
       - run: cargo fmt --check
 
   docs:
@@ -47,6 +47,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo doc --all-features --no-deps
 
+  # MSRV is a library-build promise only: the trybuild fixture's expected
+  # stderr pins rustc's current const-eval diagnostic wording, so `cargo test`
+  # is deliberately not run here.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - run: cargo check --all-features
+      - run: cargo check --no-default-features
+
   examples:
     runs-on: ubuntu-latest
     steps:
@@ -54,5 +65,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: thumbv6m-none-eabi
+          components: clippy, rustfmt
       - run: cargo build --release
+        working-directory: examples/rp2040
+      # examples/rp2040 declares its own [workspace], so the root job's
+      # clippy/fmt cannot reach it. `--bins` rather than `--all-targets`:
+      # the test targets need libtest, which thumbv6m-none-eabi has no
+      # prebuilt copy of. The four binaries are the whole crate.
+      - run: cargo clippy --bins -- -D warnings
+        working-directory: examples/rp2040
+      - run: cargo fmt --check
         working-directory: examples/rp2040
