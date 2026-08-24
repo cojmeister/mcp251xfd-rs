@@ -3372,7 +3372,7 @@ git commit -m "feat: receive path, interrupt flags/enables, event decode, error 
 - Produces: on `MCP251xFdAsync` only:
   - `async fn wait_rx<P: Wait>(&mut self, fifo: Fifo, int_pin: &mut P) -> Result<RxFrame, Error<SPI::Error>>`
 
-- [ ] **Step 1: Create `tests/async_driver.rs` with failing tests**
+- [x] **Step 1: Create `tests/async_driver.rs` with failing tests**
 
 ```rust
 //! Async-variant integration tests (compiled only with the `async` feature).
@@ -3455,12 +3455,12 @@ async fn async_receive_empty_errors() {
 
 Add to `Cargo.toml` `[dev-dependencies]`: nothing new (embedded-hal is already a main dependency; `embedded-hal-async` comes in via `--all-features`).
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cargo test --all-features --test async_driver`
 Expected: FAIL — `wait_rx` missing.
 
-- [ ] **Step 3: Implement in `src/driver.rs`**
+- [x] **Step 3: Implement in `src/driver.rs`**
 
 ```rust
 /// Async-only conveniences built on the interrupt pin.
@@ -3494,12 +3494,12 @@ impl<SPI: SpiDeviceAsync> MCP251xFdAsync<SPI> {
 
 Note: `maybe-async-cfg` renames doc-comment intra-links too only within its own items — this block is hand-written, so `Self::apply_layout` resolves against `MCP251xFdAsync` (generated with the same method names). If `cargo doc` cannot resolve the links (generated items sometimes lose doc anchors), downgrade them to plain code spans — zero-warning docs win over link niceties.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test --all-features`
 Expected: PASS, including both async test files.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 cargo clippy --all-features -- -D warnings && cargo fmt

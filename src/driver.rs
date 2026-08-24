@@ -578,3 +578,35 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         Ok(CiTrec(self.bus.read_sfr32(addr::C1TREC).await?))
     }
 }
+
+/// Async-only conveniences built on the interrupt pin.
+#[cfg(feature = "async")]
+impl<SPI: SpiDeviceAsync> MCP251xFdAsync<SPI> {
+    /// Waits until a frame arrives on `fifo` and returns it.
+    ///
+    /// Level-triggered and race-free: the FIFO is checked *before* waiting
+    /// on the pin, so a frame that arrives between calls is never missed.
+    /// Per DS20006027B §5 (`IOCON`, 0xE04), the INT pins are active-low and
+    /// default to push-pull (open-drain is selectable via `IOCON.INTOD`,
+    /// which this driver never sets); either way, nINT stays asserted low
+    /// as long as any enabled interrupt is pending. Requirements: the FIFO
+    /// was configured by [`Self::apply_layout`] (which sets its not-empty
+    /// interrupt) and RXIE is enabled via [`Self::configure_interrupts`];
+    /// `int_pin` is the MCU input wired to nINT (any
+    /// [`embedded_hal_async::digital::Wait`] implementation — e.g. an
+    /// embassy `Input`/`ExtiInput`).
+    pub async fn wait_rx<P: embedded_hal_async::digital::Wait>(
+        &mut self,
+        fifo: Fifo,
+        int_pin: &mut P,
+    ) -> Result<RxFrame, Error<SPI::Error>> {
+        loop {
+            match self.receive(fifo).await {
+                Err(Error::RxFifoEmpty) => {
+                    int_pin.wait_for_low().await.map_err(|_| Error::IntPin)?;
+                }
+                other => return other,
+            }
+        }
+    }
+}
