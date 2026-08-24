@@ -21,7 +21,7 @@ pub(crate) enum Opcode {
     Write = 0x2,
     /// Read bytes starting at an address.
     Read = 0x3,
-    // Reserved for future CRC support (spec §"deferred"):
+    // TODO: CRC-protected SPI transfers are not implemented; opcodes reserved below.
     // WriteCrc = 0xA, ReadCrc = 0xB, SafeWrite = 0xC.
 }
 

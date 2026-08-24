@@ -302,7 +302,10 @@ impl OperationMode {
     }
 }
 
-/// Detected chip variant (see the spec: detection via `OSC.LPMEN`).
+/// Detected chip variant.
+///
+/// Probed via the `OSC.LPMEN` bit: the MCP2518FD and MCP251863 implement Low
+/// Power Mode, the MCP2517FD does not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Variant {
