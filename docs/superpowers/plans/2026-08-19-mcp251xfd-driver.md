@@ -3701,6 +3701,8 @@ git add .github/workflows/ci.yml
 git commit -m "ci: tests, no_std build, clippy/fmt/docs with zero-warning policy"
 ```
 
+> **Task 15 summary (done, commits 4edd00e + 679320a):** `.github/workflows/ci.yml` byte-for-byte from the plan's block (jobs: test, build-no-std, lint, docs, examples; RUSTFLAGS `-D warnings` global, RUSTDOCFLAGS only on docs), plus the anticipated `hashFiles` gate on the `examples` job with a `TODO(task 16)` comment — examples/rp2040 doesn't exist yet, and job-level `hashFiles` evaluates pre-checkout so the job skips unconditionally until Task 16 removes the gate. All six CI gates reproduced locally and green: `cargo test` (default + `--all-features`), clippy `-D warnings`, `fmt --check`, rustdoc `-D warnings`, and both thumbv6m-none-eabi builds (`--no-default-features` and `--all-features`) proving the crate is really `no_std`. Review: workflow verified line-by-line against the plan block and GitHub Actions semantics, zero deviations beyond the ruled gate; approved with no Critical/Important findings.
+
 ---
 
 ### Task 16: Hardware examples crate — scaffold, `enumerate`, `loopback`
