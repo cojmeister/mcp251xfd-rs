@@ -125,7 +125,24 @@ async fn main(_spawner: Spawner) {
     }
 
     // --- 3. Arbitration: A (high prio 0x010) vs B (low prio 0x700). ---
-    // Filters on C are still wide open from setup; re-open B's TX role.
+    // Re-open C wide before the arbitration rounds; step 2 narrowed it to
+    // 0x0C0/0x7DF. FRESET also drains the stale selective-test frames.
+    c.set_mode(OperationMode::Configuration, &mut Delay)
+        .await
+        .unwrap();
+    c.apply_layout(&LAYOUT).await.unwrap();
+    c.set_filter(Filter::F0, FilterMatch::accept_all(), Fifo::F2)
+        .await
+        .unwrap();
+    c.disable_filter(Filter::F1).await.unwrap();
+    c.set_mode(OperationMode::Normal20, &mut Delay)
+        .await
+        .unwrap();
+
+    // A's RX FIFO F2 (still accept_all via filter F0) is untouched here: it
+    // quietly accumulates B's ten 0x700 frames over these rounds, leaving 6
+    // of its 16 slots free. Harmless for this test, which never reads A's
+    // FIFO.
     let mut received = 0usize;
     let mut high_first = 0usize;
     for round in 0..10u8 {

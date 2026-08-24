@@ -55,8 +55,7 @@ pub fn setup(p: Peripherals) -> [Device; 10] {
 }
 
 /// Polls an RX FIFO for up to ~100 ms.
-// not used by every binary that includes common.rs
-#[allow(dead_code)]
+#[allow(dead_code)] // not used by every binary that includes common.rs
 pub async fn recv_timeout(can: &mut MCP251xFdAsync<Device>, fifo: Fifo) -> Option<RxFrame> {
     for _ in 0..100 {
         match can.receive(fifo).await {
