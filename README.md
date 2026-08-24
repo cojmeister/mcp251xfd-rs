@@ -105,5 +105,6 @@ Unless you explicitly state otherwise, any contribution intentionally submitted 
 
 - MCP2518FD datasheet (Microchip DS20006027B)
 - MCP25XXFD Family Reference Manual (Microchip DS20005678E)
-- MCP2517FD/MCP2518FD silicon errata (Microchip DS80000792D)
+- MCP2517FD silicon errata (Microchip DS80000792)
+- MCP2518FD silicon errata (Microchip DS80000789)
 - [Emandhal/MCP251XFD](https://github.com/Emandhal/MCP251XFD) — a C driver for the same family, used as a cross-check during development
