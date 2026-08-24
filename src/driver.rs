@@ -609,10 +609,11 @@ impl<SPI: SpiDeviceAsync> MCP251xFdAsync<SPI> {
     /// interrupt (RXIE) enabled and a frame sitting in it; `RXOVIE` enabled,
     /// since a latched `RXOVIF` only clears via [`Self::clear_rx_overflow`],
     /// not by draining `fifo`; or `TXIE` with a TX FIFO whose not-full
-    /// interrupt is enabled. Setting `IOCON.PM1` (Register 3-2 bit 25)
-    /// dedicates the INT1 pin to RX-only interrupts, which narrows but does
-    /// not eliminate this: INT1 is still shared across all RX FIFOs, so a
-    /// busy other RX FIFO can still hold it low.
+    /// interrupt is enabled. Clearing `IOCON.PM1` (Register 3-2 bit 25; POR
+    /// default 1 = GPIO1) configures INT1 as a dedicated RX interrupt pin
+    /// (asserted when `CiINT.RXIF` and `RXIE` are set), which narrows but
+    /// does not eliminate this: INT1 is still shared across all RX FIFOs,
+    /// so a busy other RX FIFO can still hold it low.
     pub async fn wait_rx<P: embedded_hal_async::digital::Wait>(
         &mut self,
         fifo: Fifo,
