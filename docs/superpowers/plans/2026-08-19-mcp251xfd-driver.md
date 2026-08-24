@@ -3507,6 +3507,8 @@ git add src/driver.rs tests/async_driver.rs
 git commit -m "feat: async wait_rx on the nINT pin"
 ```
 
+> **Task 13 summary (done, commits ae1a8e7 + e846c3c + 570207e):** hand-written `#[cfg(feature = "async")]` impl with `wait_rx` on `MCP251xFdAsync`; `tests/async_driver.rs` with `Transaction<u8>` helpers (mock 0.11 has no default generic). Review verified against DS20006027B: INT active-low, asserted on any xIF & xIE (§6.0.1); INTOD push-pull POR default (Reg 3-2 bit 30); race-freedom sound on both sides (CiRXIF Note 1 self-clearing flags + `Wait::wait_for_low` returns immediately when already low); documented prerequisites match `apply_layout`/`configure_interrupts` bit-for-bit (TFNRFNIE→RFIF→RXIF→RXIE→INT). Fixes over the plan text: the "open-drain nINT" claim corrected (push-pull default, INTOD cited); a wrong §5 locator re-anchored to Reg 3-2/§6.0.1; a new "Caveats" section documents that nINT is a global level line so `wait_rx` can hot-spin when another enabled source (second RX FIFO, latched RXOVIF, TX IE) holds it low, with the IOCON.PM1 (clear-to-select-INT1) pointer — polarity verified against Reg 3-2 bit 25 after a first wording had it backwards.
+
 ---
 
 ### Task 14: Publishing collateral — crate docs, README, licenses
