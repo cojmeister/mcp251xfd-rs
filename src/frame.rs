@@ -222,6 +222,7 @@ pub struct RxFrame {
     pub frame: ReceivedFrame,
     /// RX timestamp. Always `None` in this version (timestamping is not
     /// yet configurable).
+    // TODO: allow enabling RX timestamps (RXTSEN) and populate this field.
     pub timestamp: Option<u32>,
 }
 

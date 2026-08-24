@@ -375,7 +375,7 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     ///
     /// `frame.flags().brs` works as expected (`CiCON.BRSDIS` stays clear).
     /// `frame.flags().esi`, however, is inert: `T1.ESI` only drives the
-    /// wire ESI bit in CAN-to-CAN gateway mode (`CiCON.ESIGM` = 1, DS20006027A
+    /// wire ESI bit in CAN-to-CAN gateway mode (`CiCON.ESIGM` = 1, DS20006027B
     /// Register 3-7 bit 17 and the `T1.ESI` note), and [`Self::init`] never
     /// sets `ESIGM` — so the transmitted ESI bit reflects the controller's
     /// own error-passive state instead of this field.
@@ -409,7 +409,7 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// chip and request transmission.
     ///
     /// `CiFIFOUA` is not guaranteed to read back a valid offset while the
-    /// chip is still in Configuration mode (DS20006027A Register 3-31 Note
+    /// chip is still in Configuration mode (DS20006027B Register 3-31 Note
     /// 1); a value at or past the end of the 2048-byte message RAM would
     /// otherwise turn into a corrupted SPI address, so it is rejected here
     /// as [`Error::CommunicationCheckFailed`] before any RAM access.
@@ -459,14 +459,14 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// A classic frame whose sender used a nonconforming DLC of 9..=15 is
     /// stored with `Frame::dlc()` capped at 8: `dlc_to_len` maps every
     /// classic DLC above 8 to 8 payload bytes, since only that many are
-    /// ever present in the message object (DS20006027A Table 3-6, Receive
+    /// ever present in the message object (DS20006027B Table 3-6, Receive
     /// Message Object, bits R1.3-0 `DLC`).
     ///
     /// This FIFO's `PLSIZE` (set via [`Self::apply_layout`]) must be at
     /// least as large as the longest frame its filters can accept: the RX
     /// message object only reserves `8 + PLSIZE` bytes, and a frame whose
     /// DLC decodes to more payload than that overruns into the next FIFO
-    /// slot (`DLCMM`, DS20006027A Register 3-22 bit 31; Table 3-6 Note 1).
+    /// slot (`DLCMM`, DS20006027B Register 3-22 bit 31; Table 3-6 Note 1).
     /// This driver keeps no per-FIFO `PLSIZE` record and does not guard
     /// against it here, so bytes beyond the configured `PLSIZE` are
     /// undefined in that case — size filters and FIFOs consistently to
@@ -540,7 +540,7 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// (write-0-to-clear; only the flag half, `C1INT` bytes 0-1, is
     /// touched).
     ///
-    /// Per DS20006027A Register 3-14's attribute rows, only `IVMIF`,
+    /// Per DS20006027B Register 3-14's attribute rows, only `IVMIF`,
     /// `WAKIF`, `CERRIF`, `SERRIF`, `MODIF`, and `TBCIF` are actually
     /// software-clearable (`HS/C`) this way. `TXIF`, `RXIF`, `TEFIF`,
     /// `RXOVIF`, `TXATIF`, `SPICRCIF`, and `ECCIF` are read-only mirrors of

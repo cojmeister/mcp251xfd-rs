@@ -85,6 +85,7 @@ Not yet implemented:
 - Sleep/wake conveniences beyond `set_mode` (fire-and-forget for Sleep — see its docs)
 - GPIO pin (`IOCON`) and CLKO divider control
 - Interrupt sources other than RX (TEF, error, wake-up, mode-change, etc.)
+- RX timestamping (`RxFrame::timestamp` is always `None`)
 
 ## Hardware examples
 
