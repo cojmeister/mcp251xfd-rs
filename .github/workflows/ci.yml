@@ -49,8 +49,6 @@ jobs:
 
   examples:
     runs-on: ubuntu-latest
-    # TODO(task 16): remove this gate once examples/rp2040 exists
-    if: ${{ hashFiles('examples/rp2040/Cargo.toml') != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

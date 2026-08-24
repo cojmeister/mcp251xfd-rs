@@ -1,0 +1,5 @@
+/target
+# The root .gitignore excludes Cargo.lock (correct for the library crate);
+# re-include it here since this is a standalone binary application crate,
+# where committing the lockfile is the recommended practice.
+!Cargo.lock
