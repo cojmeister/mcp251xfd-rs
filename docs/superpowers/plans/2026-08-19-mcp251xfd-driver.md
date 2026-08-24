@@ -3519,7 +3519,7 @@ git commit -m "feat: async wait_rx on the nINT pin"
 
 **Interfaces:** none produced; this task is documentation only, but it is gated like any other (docs build warning-free).
 
-- [ ] **Step 1: Expand the crate-level docs in `src/lib.rs`**
+- [x] **Step 1: Expand the crate-level docs in `src/lib.rs`**
 
 Replace the doc header with:
 
@@ -3578,7 +3578,7 @@ Replace the doc header with:
 //! ```
 ```
 
-- [ ] **Step 2: Write `README.md`**
+- [x] **Step 2: Write `README.md`**
 
 Content requirements (write it out, keep it under ~120 lines): title + one-line description; badges omitted until CI exists on GitHub; feature bullet list mirroring the crate docs; supported chips table (MCP2517FD / MCP2518FD / MCP251863, auto-detected); the sync usage example from Step 1 plus a short async/embassy snippet:
 
@@ -3595,7 +3595,7 @@ let frame = can.wait_rx(Fifo::F2, &mut int_pin).await?;
 
 …then sections: **SPI clock limit** (the erratum, `max_spi_hz`, 17 MHz @ 40 MHz), **Feature flags** (`async`, `defmt`, `log`), **Status** (v0.1 scope + deferred list from the spec), **Hardware examples** (pointer to `examples/rp2040`), **License** (MIT OR Apache-2.0 dual-license boilerplate), **References** (datasheet DS20006027B, family reference manual DS20005678E, errata DS80000792D, the Emandhal C driver).
 
-- [ ] **Step 3: Add license texts**
+- [x] **Step 3: Add license texts**
 
 ```bash
 curl -sSf -o LICENSE-APACHE https://www.apache.org/licenses/LICENSE-2.0.txt
@@ -3603,12 +3603,12 @@ curl -sSf -o LICENSE-APACHE https://www.apache.org/licenses/LICENSE-2.0.txt
 
 Create `LICENSE-MIT` with the standard MIT text and the line `Copyright (c) 2026 Lucas Cohen`.
 
-- [ ] **Step 4: Verify docs and packaging**
+- [x] **Step 4: Verify docs and packaging**
 
 Run: `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps && cargo package --list --allow-dirty`
 Expected: docs build with zero warnings; the package listing contains `src/`, `README.md`, both licenses, `Cargo.toml` — and does **not** need `examples/rp2040` (it may appear; that is acceptable, it is small text).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lib.rs README.md LICENSE-MIT LICENSE-APACHE
