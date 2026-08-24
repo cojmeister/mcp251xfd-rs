@@ -113,6 +113,27 @@ impl TxHeader {
     }
 }
 
+#[cfg(feature = "defmt")]
+// Manual impl because `embedded_can::Id` lacks `defmt::Format`.
+impl defmt::Format for TxHeader {
+    fn format(&self, fmt: defmt::Formatter) {
+        let (extended, raw) = id_parts(self.id);
+        defmt::write!(
+            fmt,
+            "TxHeader {{ id: {=u32:#x}, extended: {=bool}, dlc: {=u8}, rtr: {=bool}, \
+             brs: {=bool}, fdf: {=bool}, esi: {=bool}, seq: {=u32} }}",
+            raw,
+            extended,
+            self.dlc,
+            self.rtr,
+            self.brs,
+            self.fdf,
+            self.esi,
+            self.seq
+        );
+    }
+}
+
 /// The fields decoded from an RX message object header (words R0 and R1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RxHeader {
@@ -146,6 +167,36 @@ impl RxHeader {
             esi: r1 & (1 << 8) != 0,
             filhit: ((r1 >> 11) & 0x1F) as u8,
         }
+    }
+}
+
+#[cfg(feature = "defmt")]
+// Manual impl because `embedded_can::Id` lacks `defmt::Format`.
+impl defmt::Format for RxHeader {
+    fn format(&self, fmt: defmt::Formatter) {
+        let (extended, raw) = id_parts(self.id);
+        defmt::write!(
+            fmt,
+            "RxHeader {{ id: {=u32:#x}, extended: {=bool}, dlc: {=u8}, rtr: {=bool}, \
+             brs: {=bool}, fdf: {=bool}, esi: {=bool}, filhit: {=u8} }}",
+            raw,
+            extended,
+            self.dlc,
+            self.rtr,
+            self.brs,
+            self.fdf,
+            self.esi,
+            self.filhit
+        );
+    }
+}
+
+/// Splits an [`Id`] into `(extended, raw)` for `defmt` formatting.
+#[cfg(feature = "defmt")]
+fn id_parts(id: Id) -> (bool, u32) {
+    match id {
+        Id::Standard(sid) => (false, sid.as_raw() as u32),
+        Id::Extended(eid) => (true, eid.as_raw()),
     }
 }
 

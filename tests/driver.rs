@@ -5,7 +5,7 @@ use embedded_can::{Id, StandardId};
 use embedded_hal_mock::eh1::delay::NoopDelay;
 use embedded_hal_mock::eh1::spi::{Mock, Transaction};
 use mcp251xfd::{
-    ClockConfig, Config, DataBitTiming, Error, Event, FdFrame, Fifo, FifoLayout, Filter,
+    CiInt, ClockConfig, Config, DataBitTiming, Error, Event, FdFrame, Fifo, FifoLayout, Filter,
     FilterMatch, Frame, FrameFlags, MCP251xFd, NominalBitTiming, OperationMode, PayloadSize,
     ReceivedFrame, Variant,
 };
@@ -328,6 +328,63 @@ fn transmit_rejects_out_of_range_ua() {
 }
 
 #[test]
+fn transmit_rejects_object_running_past_end_of_ram() {
+    // A 64-byte FD frame writes 8 + 64 = 72 bytes. CiFIFOUA reads back
+    // 0x7C0, which is inside message RAM (0x800 bytes) but only 0x40 bytes
+    // from its end — the object would run to 0x808. That means this FIFO's
+    // PLSIZE is smaller than the frame; refuse before touching RAM.
+    let frame = FdFrame::new(
+        StandardId::new(0x123).unwrap(),
+        &[0x5A; 64],
+        FrameFlags::default(),
+    )
+    .unwrap();
+    let mut e = Vec::new();
+    e.extend(r32(0x060, 0x0000_0001)); // not full
+    e.extend(r32(0x064, 0x0000_07C0)); // UA + 72 > RAM_SIZE
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert!(matches!(
+        can.transmit_fd(Fifo::F1, &frame),
+        Err(Error::CommunicationCheckFailed)
+    ));
+    // `Mock::done` fails if any further transaction (the RAM write, the
+    // CiFIFOCON byte) had been issued.
+    spi.done();
+}
+
+#[test]
+fn receive_zeroes_stale_padding_bytes() {
+    // DLC 5 reads a 8-byte-padded word run; bytes 5..8 belong to whatever
+    // occupied this RAM slot before and must not reach the frame, or the
+    // derived PartialEq/Debug compare and print bus leftovers.
+    let mut e = Vec::new();
+    e.extend(r32(0x06C, 0x0000_0001)); // CiFIFOSTA2: not empty
+    e.extend(r32(0x070, 0x0000_0020)); // CiFIFOUA2: offset 0x20
+    e.extend(rram(
+        0x420,
+        &[0x23, 0x01, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00],
+    )); // R0: SID 0x123, R1: DLC 5
+    e.extend(rram(
+        0x428,
+        &[0x01, 0x02, 0x03, 0x04, 0x05, 0xDE, 0xAD, 0xBE],
+    )); // 5 payload bytes + 3 stale bytes of the previous occupant
+    e.extend(w8(0x069, 0x01)); // CiFIFOCON2 byte1: UINC
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    let rx = can.receive(Fifo::F2).unwrap();
+    match rx.frame {
+        ReceivedFrame::Classic(f) => {
+            assert_eq!(f.data(), &[1, 2, 3, 4, 5]);
+            let expected = Frame::new(StandardId::new(0x123).unwrap(), &[1, 2, 3, 4, 5]).unwrap();
+            assert_eq!(f, expected);
+        }
+        ReceivedFrame::Fd(_) => panic!("expected classic frame"),
+    }
+    spi.done();
+}
+
+#[test]
 fn receive_classic_frame() {
     let mut e = Vec::new();
     e.extend(r32(0x06C, 0x0000_0001)); // CiFIFOSTA2: not empty
@@ -426,8 +483,7 @@ fn interrupts_and_events() {
     let flags = can.interrupt_flags().unwrap();
     assert!(flags.rxif());
     can.clear_interrupts(flags).unwrap();
-    can.configure_interrupts(mcp251xfd::registers::CiInt(0).with_rxie(true))
-        .unwrap();
+    can.configure_interrupts(CiInt(0).with_rxie(true)).unwrap();
     assert_eq!(can.pending_event().unwrap(), Event::Fifo(Fifo::F2));
     assert_eq!(can.pending_event().unwrap(), Event::None);
     let trec = can.error_counters().unwrap();

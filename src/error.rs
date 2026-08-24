@@ -9,10 +9,15 @@
 pub enum Error<E> {
     /// The SPI transaction itself failed.
     Spi(E),
-    /// The chip returned an implausible value: the init-time RAM echo test
-    /// (write/read `0xAA55AA55`) failed, or a FIFO user address (`CiFIFOUA`)
-    /// was outside message RAM (the chip is possibly still in Configuration
-    /// mode, where `CiFIFOUA` is not guaranteed to read back correctly).
+    /// The chip returned an implausible value, or a message-RAM access
+    /// derived from one would have left the 2048-byte window: the init-time
+    /// RAM echo test (write/read `0xAA55AA55`) failed, a FIFO user address
+    /// (`CiFIFOUA`) read back at or past the end of message RAM (the chip is
+    /// possibly still in Configuration mode, where `CiFIFOUA` is not
+    /// guaranteed to read back correctly), or the message object at that
+    /// address would extend past the end of message RAM — which additionally
+    /// happens when a FIFO's `PLSIZE` is smaller than the frame being
+    /// transmitted or received.
     ///
     /// Usually wiring, a wrong CS line, or an SPI clock above the erratum
     /// limit of `0.85 * SYSCLK / 2` (see [`crate::max_spi_hz`]).
@@ -27,8 +32,6 @@ pub enum Error<E> {
     TxFifoFull,
     /// The RX FIFO holds no message.
     RxFifoEmpty,
-    /// The requested FIFO layout does not fit the 2048-byte message RAM.
-    RamOverflow,
     /// A configuration value is out of range.
     InvalidConfig(ConfigError),
     /// A frame payload length is not a valid CAN (FD) length.
@@ -55,15 +58,15 @@ impl<E: core::fmt::Debug> core::fmt::Display for Error<E> {
         match self {
             Error::Spi(e) => write!(f, "SPI error: {e:?}"),
             Error::CommunicationCheckFailed => f.write_str(
-                "chip returned an implausible value (RAM echo test failed, or a FIFO user \
-                 address was outside message RAM); check wiring, CS, and SPI clock speed",
+                "chip returned an implausible value (RAM echo test failed, or a message object \
+                 was outside message RAM); check wiring, CS, SPI clock speed, and FIFO payload \
+                 sizes",
             ),
             Error::ClockNotReady => f.write_str("oscillator/PLL not ready"),
             Error::ModeChangeTimeout => f.write_str("operation mode change timed out"),
             Error::NotInConfigMode => f.write_str("chip is not in Configuration mode"),
             Error::TxFifoFull => f.write_str("TX FIFO is full"),
             Error::RxFifoEmpty => f.write_str("RX FIFO is empty"),
-            Error::RamOverflow => f.write_str("FIFO layout exceeds 2048-byte message RAM"),
             Error::InvalidConfig(ConfigError::NominalBitTiming) => {
                 f.write_str("invalid nominal bit timing")
             }

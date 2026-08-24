@@ -68,4 +68,5 @@ pub use driver::MCP251xFdAsync;
 pub use error::{ConfigError, Error};
 pub use frame::{FdFrame, Frame, FrameFlags, ReceivedFrame, RxFrame};
 pub use registers::ram::FifoLayout;
+pub use registers::{CiFifoSta, CiInt, CiTrec};
 pub use registers::{Fifo, Filter, OperationMode, PayloadSize, Variant};

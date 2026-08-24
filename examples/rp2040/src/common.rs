@@ -55,12 +55,23 @@ pub fn setup(p: Peripherals) -> [Device; 10] {
 }
 
 /// Polls an RX FIFO for up to ~100 ms.
+///
+/// Only an empty FIFO is retried. Any other error — an SPI fault, a bad
+/// `CiFIFOUA` read-back — is logged once and aborts the wait, so a dead bus
+/// is not reported as a CAN timeout that sends the operator looking at
+/// transceivers and termination.
 #[allow(dead_code)] // not used by every binary that includes common.rs
 pub async fn recv_timeout(can: &mut MCP251xFdAsync<Device>, fifo: Fifo) -> Option<RxFrame> {
     for _ in 0..100 {
         match can.receive(fifo).await {
             Ok(rx) => return Some(rx),
-            Err(_) => Timer::after_millis(1).await,
+            Err(mcp251xfd::Error::RxFifoEmpty) => Timer::after_millis(1).await,
+            Err(e) => {
+                // `Debug2Format`: the SPI device's own error type does not
+                // implement `defmt::Format`, so `Error<E>` does not either.
+                defmt::error!("recv on {}: {}", fifo, defmt::Debug2Format(&e));
+                return None;
+            }
         }
     }
     None

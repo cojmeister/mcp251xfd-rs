@@ -286,10 +286,14 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// Writes the FIFO configuration registers for a validated layout.
     ///
     /// The chip allocates RAM for the FIFOs itself; the layout only needs
-    /// to fit (guaranteed by [`FifoLayout`]'s construction). Requires
-    /// Configuration mode. RX FIFOs are configured with not-empty and
-    /// overflow interrupts enabled at the FIFO level; whether they reach
-    /// the INT pin is controlled by `configure_interrupts`.
+    /// to fit, which [`FifoLayout`]'s construction guarantees — provided
+    /// FIFO numbers are allocated contiguously from [`Fifo::F1`]. See
+    /// [`FifoLayout`] for why gapped layouts are not validated against the
+    /// chip's address generation.
+    ///
+    /// Requires Configuration mode. RX FIFOs are configured with not-empty
+    /// and overflow interrupts enabled at the FIFO level; whether they
+    /// reach the INT pin is controlled by `configure_interrupts`.
     ///
     /// `TXAT` (retransmission attempts, bits 22:21) is left at 0 for TX
     /// FIFOs; that field is inert while `CiCON.RTXAT` stays clear, which is
@@ -358,6 +362,18 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// clear, so the per-FIFO `TXAT` field is inert and the chip keeps
     /// retrying a frame that loses arbitration or errors out until it wins
     /// the bus.
+    ///
+    /// This FIFO's `PLSIZE` (set via [`Self::apply_layout`]) must be at
+    /// least as large as the longest frame handed to it: the TX message
+    /// object only reserves `8 + PLSIZE` bytes, and a longer frame is
+    /// written straight over the neighbouring elements of this or the next
+    /// FIFO (DS20006027B Register 3-22 bit 31 `PLSIZE`; Table 3-5, Transmit
+    /// Message Object). This driver keeps no per-FIFO `PLSIZE` record and
+    /// cannot detect the mismatch — it only refuses the write when it would
+    /// leave the 2048-byte message RAM entirely
+    /// ([`Error::CommunicationCheckFailed`]). Size FIFOs for the frames
+    /// they carry. Classic frames never exceed 8 bytes, so a `PLSIZE` of
+    /// `PayloadSize::B8` or larger is always safe here.
     pub async fn transmit(&mut self, fifo: Fifo, frame: &Frame) -> Result<(), Error<SPI::Error>> {
         let header = TxHeader {
             id: frame.id(),
@@ -379,6 +395,17 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// Register 3-7 bit 17 and the `T1.ESI` note), and [`Self::init`] never
     /// sets `ESIGM` — so the transmitted ESI bit reflects the controller's
     /// own error-passive state instead of this field.
+    ///
+    /// This FIFO's `PLSIZE` (set via [`Self::apply_layout`]) must be at
+    /// least as large as the longest frame handed to it: the TX message
+    /// object only reserves `8 + PLSIZE` bytes, and a longer frame is
+    /// written straight over the neighbouring elements of this or the next
+    /// FIFO (DS20006027B Register 3-22 bit 31 `PLSIZE`; Table 3-5, Transmit
+    /// Message Object). This driver keeps no per-FIFO `PLSIZE` record and
+    /// cannot detect the mismatch — it only refuses the write when it would
+    /// leave the 2048-byte message RAM entirely
+    /// ([`Error::CommunicationCheckFailed`]). A 64-byte FD frame therefore
+    /// needs `PayloadSize::B64`; size FIFOs for the frames they carry.
     pub async fn transmit_fd(
         &mut self,
         fifo: Fifo,
@@ -413,6 +440,17 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// 1); a value at or past the end of the 2048-byte message RAM would
     /// otherwise turn into a corrupted SPI address, so it is rejected here
     /// as [`Error::CommunicationCheckFailed`] before any RAM access.
+    ///
+    /// The object's end is bounded the same way: a write of `8 + payload`
+    /// bytes starting at `UA` must still land inside the 2048-byte window.
+    /// It would not if the FIFO's `PLSIZE` is smaller than this frame (the
+    /// chip then spaces its elements more tightly than the driver writes
+    /// them) — near the top of RAM that becomes an SPI write past the last
+    /// message-RAM address, which the address-rollover erratum
+    /// (DS80000792 / DS80000789) says must not be relied on. Such a write
+    /// is refused with [`Error::CommunicationCheckFailed`]; an overrun that
+    /// stays inside the window cannot be detected here, since the driver
+    /// keeps no per-FIFO `PLSIZE` record (see [`Self::transmit_fd`]).
     async fn transmit_raw(
         &mut self,
         fifo: Fifo,
@@ -429,17 +467,21 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         if ua as usize >= addr::RAM_SIZE {
             return Err(Error::CommunicationCheckFailed);
         }
+        // 8 header bytes + payload zero-padded to a 32-bit boundary.
+        let len = 8 + payload.len().div_ceil(4) * 4;
+        // End-bound the write as well as its start: see the note above.
+        if ua as usize + len > addr::RAM_SIZE {
+            return Err(Error::CommunicationCheckFailed);
+        }
 
         header.seq = self.seq & self.seq_mask;
         self.seq = self.seq.wrapping_add(1);
         let [t0, t1] = header.to_words();
 
-        // 8 header bytes + payload zero-padded to a 32-bit boundary.
         let mut obj = [0u8; 72];
         obj[0..4].copy_from_slice(&t0.to_le_bytes());
         obj[4..8].copy_from_slice(&t1.to_le_bytes());
         obj[8..8 + payload.len()].copy_from_slice(payload);
-        let len = 8 + payload.len().div_ceil(4) * 4;
 
         self.bus
             .write_ram(addr::RAM_START + ua as u16, &obj[..len])
@@ -470,7 +512,15 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// This driver keeps no per-FIFO `PLSIZE` record and does not guard
     /// against it here, so bytes beyond the configured `PLSIZE` are
     /// undefined in that case — size filters and FIFOs consistently to
-    /// avoid it.
+    /// avoid it. The one case that *is* caught is a read that would leave
+    /// the 2048-byte message RAM entirely: it fails with
+    /// [`Error::CommunicationCheckFailed`] instead.
+    ///
+    /// `fifo` must be a receive FIFO. The driver keeps no per-FIFO
+    /// direction record either, so passing a transmit FIFO's handle decodes
+    /// that FIFO's TX message object as if it were an RX one — arbitrary
+    /// identifier, DLC and payload — *and* still writes `UINC`, advancing
+    /// the transmit FIFO's tail past an element the chip has not sent.
     pub async fn receive(&mut self, fifo: Fifo) -> Result<RxFrame, Error<SPI::Error>> {
         let sta = CiFifoSta(self.bus.read_sfr32(addr::fifo_sta(fifo)).await?);
         if !sta.not_full_or_not_empty() {
@@ -492,9 +542,17 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
 
         let len = dlc_to_len(header.dlc, header.fdf);
         let padded = len.div_ceil(4) * 4;
+        // End-bound the read the same way `transmit_raw` bounds its write.
+        if ua as usize + 8 + padded > addr::RAM_SIZE {
+            return Err(Error::CommunicationCheckFailed);
+        }
         let mut data = [0u8; 64];
         if padded > 0 {
             self.bus.read_ram(base + 8, &mut data[..padded]).await?;
+            // Only `len` bytes are payload; the rest of the last word holds
+            // whatever occupied this RAM slot before. Zero it so the frame's
+            // derived `PartialEq`/`Debug` can't see the previous occupant.
+            data[len..padded].fill(0);
         }
         self.bus
             .write_sfr8(addr::fifo_con(fifo) + 1, CiFifoCon::CON_BYTE1_UINC)
