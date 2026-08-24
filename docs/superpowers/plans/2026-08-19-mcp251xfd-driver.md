@@ -3615,6 +3615,8 @@ git add src/lib.rs README.md LICENSE-MIT LICENSE-APACHE
 git commit -m "docs: crate documentation, README, dual license"
 ```
 
+> **Task 14 summary (done, commits 5e5b930 + 5033d41 + 11da538 + 5a7149d):** crate-level docs replaced with the spec'd header verbatim; README.md (110 lines) with feature list, chip table, sync+async examples, SPI-limit/feature-flags/status/license/references sections; canonical LICENSE-APACHE + LICENSE-MIT (© 2026 Lucas Cohen). Gates green: rustdoc `-D warnings` --all-features, `cargo package --list` includes all collateral, full test suite passing. Review fetched the actual Microchip PDFs: 0.85·SYSCLK/2 → 17 MHz @ 40 MHz confirmed (DS80000792 item 5), DS20006027B/DS20005678E titles confirmed, LPMEN-probe/2 KiB-RAM/64-byte-FD/SEQ-width claims all MATCH code and datasheet. Fix over the plan text: the plan's single "MCP2517FD/MCP2518FD errata DS80000792D" citation is wrong — DS80000792 covers only the MCP2517FD; README now cites DS80000789 for the MCP2518FD separately, and `max_spi_hz`'s doc states the SPI cap binds **all** variants with both errata cited. Also swept this task (user directive): no code comment references the internal spec/plan documents any more (bus.rs CRC note is now a self-contained TODO; `Variant` doc describes the LPMEN probe directly).
+
 ---
 
 ### Task 15: CI workflow
