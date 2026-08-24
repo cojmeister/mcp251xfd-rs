@@ -385,6 +385,36 @@ fn receive_zeroes_stale_padding_bytes() {
 }
 
 #[test]
+fn receive_remote_frame_skips_payload_and_stays_zeroed() {
+    // A classic RTR frame carries no data bytes on the wire, so the payload
+    // slot holds the RAM element's previous occupant. The driver must not
+    // read it at all: the expectation list has no payload transaction, so
+    // Mock::done() fails if one is issued, and the frame must equal
+    // Frame::new_remote's all-zero-array construction.
+    let mut e = Vec::new();
+    e.extend(r32(0x06C, 0x0000_0001)); // CiFIFOSTA2: not empty
+    e.extend(r32(0x070, 0x0000_0020)); // CiFIFOUA2: offset 0x20
+    e.extend(rram(
+        0x420,
+        &[0x23, 0x01, 0x00, 0x00, 0x24, 0x00, 0x00, 0x00],
+    )); // R0: SID 0x123, R1: DLC 4 | RTR (bit 5)
+    e.extend(w8(0x069, 0x01)); // CiFIFOCON2 byte1: UINC
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    let rx = can.receive(Fifo::F2).unwrap();
+    match rx.frame {
+        ReceivedFrame::Classic(f) => {
+            assert!(f.is_remote_frame());
+            assert_eq!(f.dlc(), 4);
+            let expected = Frame::new_remote(StandardId::new(0x123).unwrap(), 4).unwrap();
+            assert_eq!(f, expected);
+        }
+        ReceivedFrame::Fd(_) => panic!("expected classic frame"),
+    }
+    spi.done();
+}
+
+#[test]
 fn receive_classic_frame() {
     let mut e = Vec::new();
     e.extend(r32(0x06C, 0x0000_0001)); // CiFIFOSTA2: not empty

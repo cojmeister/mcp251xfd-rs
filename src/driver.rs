@@ -551,7 +551,12 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
             return Err(Error::CommunicationCheckFailed);
         }
         let mut data = [0u8; 64];
-        if padded > 0 {
+        // A remote frame carries no data bytes on the wire (classic CAN
+        // only — CAN FD has no remote frames), so the object's payload slot
+        // holds whatever occupied this RAM element before. Skip the read and
+        // leave `data` all-zero, matching [`Frame::new_remote`].
+        let remote = header.rtr && !header.fdf;
+        if padded > 0 && !remote {
             self.bus.read_ram(base + 8, &mut data[..padded]).await?;
             // Only `len` bytes are payload; the rest of the last word holds
             // whatever occupied this RAM slot before. Zero it so the frame's
