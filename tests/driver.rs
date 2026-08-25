@@ -91,6 +91,7 @@ fn init_expectations() -> Vec<Transaction<u8>> {
     e.extend(w32(0x008, 0x000E_0303)); // DBTCFG: brp1, tseg1 15, tseg2 4, sjw 4
     e.extend(w32(0x00C, 0x0202_0F00)); // TDC: auto, TDCO=15, edge filter
     e.extend(w32(0x000, 0x0400_0020)); // CiCON: ISOCRCEN, REQOP=Configuration
+    e.extend(r32(0x000, 0x0480_0020)); // confirm OPMOD really is Configuration
     e.extend(w32(0x01C, 0x0000_0000)); // CiINT cleared, all disabled
     e
 }
@@ -122,6 +123,7 @@ fn init_detects_2518fd_when_lpmen_sticks() {
     e.extend(w32(0x008, 0x000E_0303));
     e.extend(w32(0x00C, 0x0202_0F00));
     e.extend(w32(0x000, 0x0400_0020));
+    e.extend(r32(0x000, 0x0480_0020)); // confirm OPMOD really is Configuration
     e.extend(w32(0x01C, 0x0000_0000));
     let mut spi = Mock::new(&e);
     let mut can = MCP251xFd::new(&mut spi);
@@ -537,5 +539,93 @@ fn interrupts_and_events() {
     let trec = can.error_counters().unwrap();
     assert_eq!(trec.tec(), 0x15);
     assert!(trec.tx_bus_off());
+    spi.done();
+}
+
+/// A `CiFIFOUA` read whose value is not 32-bit aligned is corrupt: message
+/// objects always start on a word boundary. Before this was checked, an
+/// unaligned address reached `bus::write_ram`, tripping its alignment
+/// `debug_assert` in a debug build and issuing a RAM access the chip does not
+/// support in release. Observed on real hardware as message-object headers
+/// read back from the wrong offset.
+#[test]
+fn transmit_rejects_unaligned_fifo_user_address() {
+    let frame = Frame::new(StandardId::new(0x123).unwrap(), &[1, 2, 3, 4]).unwrap();
+    let mut e = Vec::new();
+    e.extend(r32(0x060, 0x0000_0001)); // not full
+    e.extend(r32(0x064, 0x0000_0002)); // UA = 2: not word-aligned
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert_eq!(
+        can.transmit(Fifo::F1, &frame),
+        Err(Error::CommunicationCheckFailed)
+    );
+    spi.done();
+}
+
+/// The same check on the receive path.
+#[test]
+fn receive_rejects_unaligned_fifo_user_address() {
+    let mut e = Vec::new();
+    e.extend(r32(0x06C, 0x0000_0001)); // CiFIFOSTA2: not empty
+    e.extend(r32(0x070, 0x0000_0006)); // UA = 6: not word-aligned
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert_eq!(
+        can.receive(Fifo::F2).unwrap_err(),
+        Error::CommunicationCheckFailed
+    );
+    spi.done();
+}
+
+/// A `CiFIFOUA` value above the 2048-byte RAM window must be rejected on the
+/// raw read, before the 12-bit field mask folds it into a plausible offset.
+#[test]
+fn transmit_rejects_out_of_range_fifo_user_address() {
+    let frame = Frame::new(StandardId::new(0x123).unwrap(), &[1, 2, 3, 4]).unwrap();
+    let mut e = Vec::new();
+    e.extend(r32(0x060, 0x0000_0001));
+    // 0x1000 masks to 0x000 with `& 0xFFF` -- previously accepted as offset 0.
+    e.extend(r32(0x064, 0x0000_1000));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert_eq!(
+        can.transmit(Fifo::F1, &frame),
+        Err(Error::CommunicationCheckFailed)
+    );
+    spi.done();
+}
+
+/// With no data-phase timing configured, `init` must set `CiCON.BRSDIS` so a
+/// later `transmit_fd` with `FrameFlags::brs` cannot switch the chip into an
+/// unconfigured data phase with no secondary sample point.
+#[test]
+fn init_without_data_timing_disables_brs() {
+    let cfg = Config {
+        clock: ClockConfig::MHZ40,
+        nominal: NominalBitTiming::KBPS500_40MHZ,
+        data: None,
+    };
+    let mut e = Vec::new();
+    e.extend(reset_txn());
+    e.extend(wram(0xBFC, &0xAA55_AA55u32.to_le_bytes()));
+    e.extend(rram(0xBFC, &0xAA55_AA55u32.to_le_bytes()));
+    e.extend(w32(0xE00, 0x0000_0060));
+    e.extend(r32(0xE00, 0x0000_0460));
+    e.extend(w32(0xE00, 0x0000_0068));
+    e.extend(r32(0xE00, 0x0000_0460));
+    e.extend(w32(0xE00, 0x0000_0060));
+    for i in 0..32u16 {
+        e.extend(wram(0x400 + i * 64, &[0u8; 64]));
+    }
+    e.extend(w32(0x004, 0x003E_0F0F)); // NBTCFG
+    e.extend(w32(0x00C, 0x0000_0000)); // TDC off: no data timing
+    // ISOCRCEN (bit 5) | BRSDIS (bit 12) | REQOP=Configuration.
+    e.extend(w32(0x000, 0x0400_1020));
+    e.extend(r32(0x000, 0x0480_1020)); // confirm OPMOD
+    e.extend(w32(0x01C, 0x0000_0000));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert_eq!(can.init(&cfg, &mut NoopDelay).unwrap(), Variant::Mcp2517Fd);
     spi.done();
 }
