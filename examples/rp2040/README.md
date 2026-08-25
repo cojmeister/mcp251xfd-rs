@@ -43,6 +43,9 @@ not taken from the silkscreen:
 | `loopback` | SPI wiring only | Full per-chip driver stack (layout, filters, classic + FD-64 TX/RX) via internal loopback — nothing touches the CAN pins. |
 | `extended` | SPI wiring only | 29-bit extended identifiers: the SID/EID split and the standard-vs-extended distinction (`EXIDE`/`MIDE`). |
 | `filters` | SPI wiring only | `FilterMatch::with_mask` — masked acceptance filtering, including masks covering only one half of the extended-ID split. |
+| `remote` | SPI wiring only | Classic remote (RTR) frames: the RTR bit survives, no data is delivered, and no stale payload leaks out of the reused RAM slot. |
+| `layouts` | SPI wiring only | Multi-FIFO layouts: several RX FIFOs of differing `PayloadSize`, each fed by its own filter, checking the chip's RAM address generation and routing. |
+| `soak` | SPI wiring only | Sustained traffic at the production SPI clock, reporting corruption rate in ppm plus `TxFifoFull`, RX overflow, and TEC/REC. Runs until stopped. |
 | `chip2chip` | Transceivers + common CAN bus | Chip 0 → chip 1 over the real bus: classic at the nominal rate, then FD-48 with bit-rate switch. |
 | `multinode` | Transceivers + common CAN bus | Three nodes: broadcast delivery, per-node acceptance filters, and back-to-back delivery from two transmitters (20/20 frames over 10 rounds). |
 
@@ -74,7 +77,7 @@ rustup target add thumbv6m-none-eabi
 cargo build --release
 ```
 
-Builds all seven binaries with zero warnings. The `.cargo/config.toml` sets the
+Builds all ten binaries with zero warnings. The `.cargo/config.toml` sets the
 target and the linker scripts (`link.x`, `link-rp.x`); `memory.x` is the
 standard RP2040 layout (2 MB flash, 256-byte boot2 region) and relies on
 embassy-rp's default `BOOT_LOADER_W25Q080` second stage — a board with a
@@ -97,6 +100,9 @@ cargo run --release --bin bitrate      # expect: measured ~500000 bit/s -- OK
 cargo run --release --bin loopback     # expect: classic + FD-64 loopback OK per chip
 cargo run --release --bin extended     # expect: extended: all 12 checks OK
 cargo run --release --bin filters      # expect: filters: all 27 checks OK
+cargo run --release --bin remote       # expect: remote: all 12 checks OK
+cargo run --release --bin layouts      # expect: layouts: all 68 checks OK
+cargo run --release --bin soak         # expect: cycle N: ... ALL OK (runs until stopped)
 cargo run --release --bin chip2chip    # expect: classic A->B OK, FD-48 BRS A->B OK
 cargo run --release --bin multinode    # expect: broadcast/selective/back-to-back OK
 ```
@@ -119,6 +125,14 @@ receive object, so a swapped SID/EID split would cancel out and a round trip
 would look correct. The chip compares its own canonical `R0` against
 `CiFLTOBJ`, which makes the filter an independent check — the same reason
 `bitrate` exists rather than trusting loopback.
+
+`soak` is the one to leave running. Everything else sends a handful of frames
+per pass, which is exactly why an intermittent SPI fault stayed hidden for so
+long: a 50%-per-frame corruption was invisible to `enumerate`, and a
+1-in-10,000 fault would be invisible to all of the single-shot tests. `soak`
+reports the corruption rate in parts per million, and only volume reaches
+`SEQ` wraparound (every 128 transmits on the MCP2517FD), FIFO index
+wraparound, and the `TxFifoFull` / RX-overflow paths.
 A `bitrate` mismatch of almost exactly 2× means the crystal is not what
 `CAN_CONFIG` claims, and it reports which direction.
 
