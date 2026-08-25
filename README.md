@@ -61,6 +61,9 @@ let mut can = MCP251xFdAsync::new(device);
 let frame = can.wait_rx(Fifo::F2, &mut int_pin).await?;
 ```
 
+`wait_rx` has mock coverage only — it has never been run against a real nINT
+line. See [Status](#status).
+
 ## SPI clock limit (silicon erratum)
 
 RAM reads corrupt above `0.85 * SYSCLK / 2` — 17 MHz at the recommended 40 MHz SYSCLK. The driver cannot observe your bus clock; size it with `max_spi_hz`. `MCP251xFd::init` verifies communication with a RAM echo test and fails with `Error::CommunicationCheckFailed` on an over-clocked bus.
@@ -71,7 +74,6 @@ RAM reads corrupt above `0.85 * SYSCLK / 2` — 17 MHz at the recommended 40 MHz
 |---|---|
 | `async` | Adds `MCP251xFdAsync` over `embedded_hal_async::spi::SpiDevice` |
 | `defmt` | Implements `defmt::Format` on public error, config, and frame types |
-| `log` | Depends on the `log` crate (reserved for future diagnostics) |
 
 ## Minimum supported Rust version
 
@@ -79,9 +81,21 @@ RAM reads corrupt above `0.85 * SYSCLK / 2` — 17 MHz at the recommended 40 MHz
 
 ## Status
 
-This is v0.1: reset/init, oscillator setup with variant detection, bit timing, FIFO layout, acceptance filters, classic + FD transmit, receive, interrupt flags/events, error counters, and an async `wait_rx` helper on the nINT pin.
+v0.1: reset/init, oscillator setup with variant detection, bit timing, FIFO layout, acceptance filters, classic + FD transmit, receive, interrupt flags/events, error counters, and an async `wait_rx` helper on the nINT pin.
 
-The `-untested` pre-release marks that the driver has not yet been validated on real hardware — the SPI byte protocol is pinned by mock tests against the datasheet, but the [hardware examples](#hardware-examples) have not been run on a board. `0.1.0` proper will follow once they have.
+Validated on hardware — a board carrying ten MCP2517FDs on one shared SPI bus — via the [hardware examples](#hardware-examples): init and variant detection on all ten chips, the measured on-wire bit rate, classic and FD-64 internal loopback, real-bus traffic between two and three nodes, 29-bit identifiers, masked acceptance filters, remote frames, multi-FIFO layouts, and a 43,000-frame soak with no corruption and no bus errors.
+
+**Implemented but never exercised on hardware** — mock coverage only, so treat as unproven:
+
+- `wait_rx` and the interrupt API (`configure_interrupts`, `clear_interrupts`, `interrupt_flags`, `pending_event`): the nINT line was never wired on the test board
+- Error recovery — bus-off and error-passive entry and exit (`error_counters` never left zero during the soak)
+- `Sleep`/wake mode transitions
+- `Variant::Mcp2518Fd` and the MCP251863 (the test board is all MCP2517FD)
+- Any oscillator configuration using the PLL, and any SYSCLK other than 20 MHz
+- Data-phase rates other than 2 Mbit/s
+- Gapped FIFO layouts (see `FifoLayout` for why they are not validated against the chip's address generation)
+
+Two defects that hardware caught, for calibration on what mock tests can and cannot prove: a bit-timing preset paired with the wrong crystal (every rate silently halved), and an SPI clock above what the chip tolerates (intermittently corrupted register and message-RAM reads). Both were invisible to the mock suite *and* to internal loopback, because loopback shares the oscillator at both ends. The `bitrate` example exists specifically to close the first gap.
 
 Not yet implemented:
 
@@ -96,7 +110,7 @@ Not yet implemented:
 
 ## Hardware examples
 
-`examples/rp2040` is a standalone embassy crate with five runnable RP2040 binaries, used as the driver's hardware acceptance tests. `enumerate` (every chip resets, initializes, and reports its variant), `loopback` (layout, filters, classic + FD-64 TX/RX through internal loopback) and `bitrate` (measures the actual on-wire bit rate) need SPI wiring only — nothing touches the CAN pins. `chip2chip` (classic, then FD-48 with bit-rate switch, between two chips) and `multinode` (broadcast delivery, per-node acceptance filters, back-to-back delivery across three nodes) additionally need transceivers and a terminated CAN bus.
+`examples/rp2040` is a standalone embassy crate with ten runnable RP2040 binaries, used as the driver's hardware acceptance tests. Eight need SPI wiring only — nothing touches the CAN pins: `enumerate` (every chip resets, initializes, and reports its variant), `bitrate` (measures the actual on-wire bit rate), `loopback` (layout, filters, classic + FD-64 TX/RX through internal loopback), `extended` (29-bit identifiers), `filters` (masked acceptance filtering), `remote` (RTR frames), `layouts` (multi-FIFO RAM budgeting and routing), and `soak` (sustained traffic with a corruption-rate report). `chip2chip` (classic, then FD-48 with bit-rate switch, between two chips) and `multinode` (broadcast delivery, per-node acceptance filters, back-to-back delivery across three nodes) additionally need transceivers and a terminated CAN bus.
 
 Logs leave over the RP2040's own USB port as CDC-ACM serial, so **no debug probe is needed** — any serial terminal reads them.
 
