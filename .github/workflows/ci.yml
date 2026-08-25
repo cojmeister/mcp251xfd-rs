@@ -16,7 +16,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test
-      - run: cargo test --all-features
+      # Not `--all-features`: the `defmt` feature cannot link a host test
+      # binary. defmt >= 1.0 needs both a `#[global_logger]` and its own
+      # linker script (`-Tdefmt.x`) to define the `__DEFMT_MARKER_*` section
+      # symbols, and that script only exists for embedded targets. The
+      # `defmt::Format` derives are type-checked by the `lint` job's clippy
+      # run and compiled for real by `build-no-std` below.
+      - run: cargo test --features async
 
   build-no-std:
     runs-on: ubuntu-latest
@@ -27,6 +33,10 @@ jobs:
           targets: thumbv6m-none-eabi
       - run: cargo build --target thumbv6m-none-eabi --no-default-features
       - run: cargo build --target thumbv6m-none-eabi --all-features
+      # The examples crate pins its own lockfile; `--locked` makes drift fail
+      # loudly instead of being silently rewritten.
+      - run: cargo build --release --locked
+        working-directory: examples/rp2040
 
   lint:
     runs-on: ubuntu-latest
