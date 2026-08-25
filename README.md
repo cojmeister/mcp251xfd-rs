@@ -81,6 +81,8 @@ RAM reads corrupt above `0.85 * SYSCLK / 2` — 17 MHz at the recommended 40 MHz
 
 This is v0.1: reset/init, oscillator setup with variant detection, bit timing, FIFO layout, acceptance filters, classic + FD transmit, receive, interrupt flags/events, error counters, and an async `wait_rx` helper on the nINT pin.
 
+The `-untested` pre-release marks that the driver has not yet been validated on real hardware — the SPI byte protocol is pinned by mock tests against the datasheet, but the [hardware examples](#hardware-examples) have not been run on a board. `0.1.0` proper will follow once they have.
+
 Not yet implemented:
 
 - CRC-protected SPI transfers (the safe-write/CRC opcodes)
