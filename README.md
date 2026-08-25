@@ -96,9 +96,37 @@ Not yet implemented:
 
 ## Hardware examples
 
-`examples/rp2040` is a standalone embassy crate with four runnable RP2040 binaries, used as the driver's hardware acceptance tests. `enumerate` (every chip resets, initializes, and reports its variant) and `loopback` (layout, filters, classic + FD-64 TX/RX through internal loopback) need SPI wiring only — nothing touches the CAN pins. `chip2chip` (classic, then FD-48 with bit-rate switch, between two chips) and `multinode` (broadcast delivery, per-node acceptance filters, arbitration losslessness across three nodes) additionally need transceivers and a terminated CAN bus.
+`examples/rp2040` is a standalone embassy crate with five runnable RP2040 binaries, used as the driver's hardware acceptance tests. `enumerate` (every chip resets, initializes, and reports its variant), `loopback` (layout, filters, classic + FD-64 TX/RX through internal loopback) and `bitrate` (measures the actual on-wire bit rate) need SPI wiring only — nothing touches the CAN pins. `chip2chip` (classic, then FD-48 with bit-rate switch, between two chips) and `multinode` (broadcast delivery, per-node acceptance filters, back-to-back delivery across three nodes) additionally need transceivers and a terminated CAN bus.
+
+Logs leave over the RP2040's own USB port as CDC-ACM serial, so **no debug probe is needed** — any serial terminal reads them.
 
 See [`examples/rp2040/README.md`](examples/rp2040/README.md) for the board wiring, the crystal/SPI-clock assumptions, and how to build and flash them.
+
+## Bit timing and the clock it assumes
+
+Bit-timing presets are named for the SYSCLK they are computed against
+(`KBPS500_40MHZ`, `KBPS500_20MHZ`, …). **A preset is only correct on the clock
+in its name.** `Config::validate` range-checks the fields but cannot tell that a
+40 MHz preset was paired with a 20 MHz crystal: every register value is
+individually legal, so the bus just runs at half the intended rate.
+
+Internal loopback cannot catch it either — both ends of the link share the same
+oscillator, so loopback passes at the wrong bit rate. Check the pairing
+explicitly:
+
+```rust
+let sysclk = config.clock.sysclk_hz();
+assert_eq!(config.nominal.bit_rate_hz(sysclk), 500_000);
+assert_eq!(config.nominal.sample_point_permille(), 800);
+```
+
+This is not hypothetical: it is how a board ran at 250 kbit/s while every
+loopback test reported success. `examples/rp2040`'s `bitrate` binary measures
+the real on-wire rate and reports the mismatch.
+
+The SPI clock is bound to the same assumption — `max_spi_hz(sysclk)` is the
+erratum-safe cap of 0.85 × SYSCLK/2, so a wrong crystal also over-clocks the
+bus, which corrupts register and message-RAM reads.
 
 ## License
 
