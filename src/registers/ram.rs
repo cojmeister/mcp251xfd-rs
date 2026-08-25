@@ -13,6 +13,16 @@
 //!     .tx_fifo(Fifo::F1, PayloadSize::B64, 4)
 //!     .rx_fifo(Fifo::F2, PayloadSize::B64, 8);
 //! ```
+//!
+//! A layout that exceeds the 2048-byte budget fails to build
+//! (29 × (8 + 64) = 2088 bytes):
+//!
+//! ```compile_fail,E0080
+//! use mcp251xfd::registers::ram::FifoLayout;
+//! use mcp251xfd::registers::{Fifo, PayloadSize};
+//! const LAYOUT: FifoLayout =
+//!     FifoLayout::new().rx_fifo(Fifo::F1, PayloadSize::B64, 29);
+//! ```
 
 use super::{Fifo, PayloadSize, addr};
 
@@ -194,6 +204,14 @@ impl Default for FifoLayout {
 mod tests {
     use super::*;
     use crate::registers::{Fifo, PayloadSize};
+
+    #[test]
+    #[should_panic(expected = "FIFO layout exceeds 2048-byte message RAM")]
+    fn overflow_panics_with_the_documented_message() {
+        // Same layout as the module docs' compile_fail example; pins the
+        // panic message the const evaluation error surfaces.
+        let _ = FifoLayout::new().rx_fifo(Fifo::F1, PayloadSize::B64, 29);
+    }
 
     #[test]
     fn element_and_total_sizes() {

@@ -47,9 +47,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo doc --all-features --no-deps
 
-  # MSRV is a library-build promise only: the trybuild fixture's expected
-  # stderr pins rustc's current const-eval diagnostic wording, so `cargo test`
-  # is deliberately not run here.
   msrv:
     runs-on: ubuntu-latest
     steps:

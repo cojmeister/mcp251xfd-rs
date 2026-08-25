@@ -75,7 +75,7 @@ RAM reads corrupt above `0.85 * SYSCLK / 2` — 17 MHz at the recommended 40 MHz
 
 ## Minimum supported Rust version
 
-1.85 (Rust 2024 edition), covering the library build — `cargo check` / `cargo build`, with any feature combination. The development test suite needs a newer stable toolchain: its compile-fail test compares against `rustc`'s current const-eval diagnostic wording, which older compilers phrase differently.
+1.85 (Rust 2024 edition), any feature combination. Verified in CI with `cargo check` on 1.85.
 
 ## Status
 
