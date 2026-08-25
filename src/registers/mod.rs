@@ -328,10 +328,13 @@ impl Variant {
 macro_rules! bit {
     ($get:ident, $set:ident, $bit:literal, $doc:literal) => {
         #[doc = concat!("Reads ", $doc, " (bit ", stringify!($bit), ").")]
+        #[must_use]
         pub const fn $get(self) -> bool {
             self.0 & (1 << $bit) != 0
         }
         #[doc = concat!("Sets ", $doc, " (bit ", stringify!($bit), ").")]
+        // Builders return a new value; a discarded call is always a bug.
+        #[must_use]
         pub const fn $set(self, v: bool) -> Self {
             if v {
                 Self(self.0 | (1 << $bit))

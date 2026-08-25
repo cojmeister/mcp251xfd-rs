@@ -127,6 +127,57 @@ impl NominalBitTiming {
         tseg2: 8,
         sjw: 8,
     };
+    /// 125 kbit/s at 20 MHz SYSCLK (160 TQ, 80% sample point).
+    pub const KBPS125_20MHZ: Self = Self {
+        brp: 1,
+        tseg1: 127,
+        tseg2: 32,
+        sjw: 32,
+    };
+    /// 250 kbit/s at 20 MHz SYSCLK (80 TQ, 80% sample point).
+    pub const KBPS250_20MHZ: Self = Self {
+        brp: 1,
+        tseg1: 63,
+        tseg2: 16,
+        sjw: 16,
+    };
+    /// 500 kbit/s at 20 MHz SYSCLK (40 TQ, 80% sample point).
+    pub const KBPS500_20MHZ: Self = Self {
+        brp: 1,
+        tseg1: 31,
+        tseg2: 8,
+        sjw: 8,
+    };
+    /// 1 Mbit/s at 20 MHz SYSCLK (20 TQ, 80% sample point).
+    pub const MBPS1_20MHZ: Self = Self {
+        brp: 1,
+        tseg1: 15,
+        tseg2: 4,
+        sjw: 4,
+    };
+
+    /// Total time quanta per bit: `1 + tseg1 + tseg2` (the `1` is Sync_Seg).
+    #[must_use]
+    pub const fn tq_per_bit(&self) -> u32 {
+        1 + self.tseg1 as u32 + self.tseg2 as u32
+    }
+
+    /// Resulting nominal bit rate in Hz at `sysclk_hz`.
+    ///
+    /// Use this to check a preset against the clock it will actually run on:
+    /// a preset named for one crystal silently halves or doubles the bit rate
+    /// on another, and internal loopback cannot detect it because both ends of
+    /// the link share the same wrong clock.
+    #[must_use]
+    pub const fn bit_rate_hz(&self, sysclk_hz: u32) -> u32 {
+        sysclk_hz / (self.brp as u32 * self.tq_per_bit())
+    }
+
+    /// Sample point as a fraction of the bit, in per mille (`800` = 80.0%).
+    #[must_use]
+    pub const fn sample_point_permille(&self) -> u16 {
+        ((1 + self.tseg1 as u32) * 1000 / self.tq_per_bit()) as u16
+    }
 
     /// Range-checks all fields.
     pub const fn validate(&self) -> Result<(), ConfigError> {
@@ -139,6 +190,9 @@ impl NominalBitTiming {
             || self.sjw < 1
             || self.sjw > 128
             || self.sjw > self.tseg2
+            // ISO 11898-1: SJW <= min(Phase_Seg1, Phase_Seg2), and
+            // Phase_Seg1 <= TSEG1, so sjw > tseg1 is spec-invalid.
+            || self.sjw > self.tseg1
         {
             return Err(ConfigError::NominalBitTiming);
         }
@@ -188,6 +242,45 @@ impl DataBitTiming {
         tseg2: 1,
         sjw: 1,
     };
+    /// 1 Mbit/s at 20 MHz SYSCLK (20 TQ, 80% sample point).
+    pub const MBPS1_20MHZ: Self = Self {
+        brp: 1,
+        tseg1: 15,
+        tseg2: 4,
+        sjw: 4,
+    };
+    /// 2 Mbit/s at 20 MHz SYSCLK (10 TQ, 80% sample point).
+    pub const MBPS2_20MHZ: Self = Self {
+        brp: 1,
+        tseg1: 7,
+        tseg2: 2,
+        sjw: 2,
+    };
+    /// 4 Mbit/s at 20 MHz SYSCLK (5 TQ, 80% sample point).
+    pub const MBPS4_20MHZ: Self = Self {
+        brp: 1,
+        tseg1: 3,
+        tseg2: 1,
+        sjw: 1,
+    };
+
+    /// Total time quanta per bit: `1 + tseg1 + tseg2` (the `1` is Sync_Seg).
+    #[must_use]
+    pub const fn tq_per_bit(&self) -> u32 {
+        1 + self.tseg1 as u32 + self.tseg2 as u32
+    }
+
+    /// Resulting data-phase bit rate in Hz at `sysclk_hz`.
+    #[must_use]
+    pub const fn bit_rate_hz(&self, sysclk_hz: u32) -> u32 {
+        sysclk_hz / (self.brp as u32 * self.tq_per_bit())
+    }
+
+    /// Sample point as a fraction of the bit, in per mille (`800` = 80.0%).
+    #[must_use]
+    pub const fn sample_point_permille(&self) -> u16 {
+        ((1 + self.tseg1 as u32) * 1000 / self.tq_per_bit()) as u16
+    }
 
     /// Range-checks all fields.
     pub const fn validate(&self) -> Result<(), ConfigError> {
@@ -200,6 +293,12 @@ impl DataBitTiming {
             || self.sjw < 1
             || self.sjw > 16
             || self.sjw > self.tseg2
+            // ISO 11898-1, as for the nominal phase.
+            || self.sjw > self.tseg1
+            // `tdco()` must fit the 7-bit signed TDCO field. Clamping instead
+            // would silently place the secondary sample point at roughly half
+            // the intended offset.
+            || self.brp as u32 * self.tseg1 as u32 > 63
         {
             return Err(ConfigError::DataBitTiming);
         }
@@ -212,8 +311,11 @@ impl DataBitTiming {
     }
 
     /// Transmitter delay compensation offset for auto TDC mode:
-    /// `DBRP * DTSEG1`, clamped to the 7-bit signed maximum of 63
-    /// (SYSCLK cycles).
+    /// `DBRP * DTSEG1` (SYSCLK cycles).
+    ///
+    /// [`Self::validate`] rejects any configuration where this would exceed
+    /// the 7-bit signed TDCO field, so the `min` below is unreachable for a
+    /// validated timing and exists only to keep this function total.
     ///
     /// This is the recipe worked out in the family reference manual
     /// (DS20005678E §3.4.8, Table 3-5: DBRP=1/DTSEG1=15 -> TDCO=15).
@@ -226,6 +328,12 @@ impl DataBitTiming {
     pub const fn tdco(&self) -> i8 {
         let v = self.brp as u32 * self.tseg1 as u32;
         if v > 63 { 63 } else { v as i8 }
+    }
+
+    /// Whether [`Self::tdco`] fits the register field without clamping.
+    #[must_use]
+    pub const fn tdco_fits(&self) -> bool {
+        self.brp as u32 * self.tseg1 as u32 <= 63
     }
 }
 
@@ -373,6 +481,108 @@ mod tests {
         // future preset or `to_reg` change can't silently drift.
         assert_eq!(NominalBitTiming::KBPS500_40MHZ.to_reg().0, 0x003E_0F0F);
         assert_eq!(DataBitTiming::MBPS2_40MHZ.to_reg().0, 0x000E_0303);
+    }
+
+    #[test]
+    fn every_preset_hits_its_named_rate_and_sample_point() {
+        // The bug this test exists for: a preset named for one crystal was
+        // used on a board with another, halving every bit rate. Loopback
+        // cannot detect that (both ends share the clock), so the only defence
+        // is asserting rate *and* sample point against the intended SYSCLK.
+        //
+        // Sample point is checked because `preset_bit_counts` compares a sum
+        // it recomputes from the same fields, so a tseg1/tseg2 swap that
+        // preserves the total passes it while moving the sample point wildly.
+        for (p, sysclk, rate, sp) in [
+            (
+                NominalBitTiming::KBPS125_40MHZ,
+                40_000_000u32,
+                125_000u32,
+                800u16,
+            ),
+            (NominalBitTiming::KBPS250_40MHZ, 40_000_000, 250_000, 800),
+            (NominalBitTiming::KBPS500_40MHZ, 40_000_000, 500_000, 800),
+            (NominalBitTiming::MBPS1_40MHZ, 40_000_000, 1_000_000, 800),
+            (NominalBitTiming::KBPS125_20MHZ, 20_000_000, 125_000, 800),
+            (NominalBitTiming::KBPS250_20MHZ, 20_000_000, 250_000, 800),
+            (NominalBitTiming::KBPS500_20MHZ, 20_000_000, 500_000, 800),
+            (NominalBitTiming::MBPS1_20MHZ, 20_000_000, 1_000_000, 800),
+        ] {
+            assert_eq!(p.bit_rate_hz(sysclk), rate);
+            assert_eq!(p.sample_point_permille(), sp);
+            assert!(p.validate().is_ok());
+        }
+        for (p, sysclk, rate, sp) in [
+            (
+                DataBitTiming::MBPS2_40MHZ,
+                40_000_000u32,
+                2_000_000u32,
+                800u16,
+            ),
+            (DataBitTiming::MBPS5_40MHZ, 40_000_000, 5_000_000, 750),
+            (DataBitTiming::MBPS8_40MHZ, 40_000_000, 8_000_000, 800),
+            (DataBitTiming::MBPS1_20MHZ, 20_000_000, 1_000_000, 800),
+            (DataBitTiming::MBPS2_20MHZ, 20_000_000, 2_000_000, 800),
+            (DataBitTiming::MBPS4_20MHZ, 20_000_000, 4_000_000, 800),
+        ] {
+            assert_eq!(p.bit_rate_hz(sysclk), rate);
+            assert_eq!(p.sample_point_permille(), sp);
+            assert!(p.validate().is_ok());
+            assert!(p.tdco_fits(), "TDCO must fit the 7-bit field");
+        }
+        // A 40 MHz preset on a 20 MHz clock is exactly the half-rate failure
+        // observed on hardware.
+        assert_eq!(
+            NominalBitTiming::KBPS500_40MHZ.bit_rate_hz(20_000_000),
+            250_000
+        );
+        // 20 MHz presets pin their register words too.
+        assert_eq!(NominalBitTiming::KBPS500_20MHZ.to_reg().0, 0x001E_0707);
+        assert_eq!(DataBitTiming::MBPS2_20MHZ.to_reg().0, 0x0006_0101);
+    }
+
+    #[test]
+    fn sjw_larger_than_tseg1_is_rejected() {
+        // ISO 11898-1: SJW <= min(Phase_Seg1, Phase_Seg2). Previously only
+        // `sjw <= tseg2` was checked, so these passed validation.
+        assert_eq!(
+            NominalBitTiming {
+                brp: 1,
+                tseg1: 2,
+                tseg2: 128,
+                sjw: 128
+            }
+            .validate(),
+            Err(ConfigError::NominalBitTiming)
+        );
+        assert_eq!(
+            DataBitTiming {
+                brp: 1,
+                tseg1: 1,
+                tseg2: 16,
+                sjw: 16
+            }
+            .validate(),
+            Err(ConfigError::DataBitTiming)
+        );
+    }
+
+    #[test]
+    fn tdco_out_of_range_is_rejected_not_clamped() {
+        // brp * tseg1 = 8 * 15 = 120 does not fit the 7-bit signed TDCO
+        // field. Clamping to 63 would put the secondary sample point at
+        // roughly half the intended offset with no diagnostic.
+        let t = DataBitTiming {
+            brp: 8,
+            tseg1: 15,
+            tseg2: 4,
+            sjw: 4,
+        };
+        assert!(!t.tdco_fits());
+        assert_eq!(t.validate(), Err(ConfigError::DataBitTiming));
+        // The shipped presets are all well inside the field.
+        assert_eq!(DataBitTiming::MBPS2_20MHZ.tdco(), 7);
+        assert_eq!(DataBitTiming::MBPS2_40MHZ.tdco(), 15);
     }
 
     #[test]

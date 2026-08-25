@@ -227,11 +227,36 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         }
         self.bus.write_sfr32(addr::C1TDC, tdc.0).await?;
 
-        // CiCON: ISO CRC on, remain in Configuration mode.
+        // CiCON: ISO CRC on, remain in Configuration mode. `BRSDIS` is set
+        // when no data-phase timing was configured, so a caller that leaves
+        // `Config::data` at `None` and then transmits a frame with
+        // `FrameFlags::brs` cannot switch the chip into an unconfigured data
+        // phase with no secondary sample point.
         let con = CiCon(0)
             .with_iso_crc_enabled(true)
+            .with_brs_disabled(config.data.is_none())
             .with_req_op_mode(OperationMode::Configuration);
         self.bus.write_sfr32(addr::C1CON, con.0).await?;
+
+        // Confirm the chip really is in Configuration mode rather than
+        // assuming the request took. If the opening RESET was ignored -- which
+        // DS20006027B only guarantees from Configuration mode -- returning
+        // `Ok` here would hand back a chip in its previous mode, and the next
+        // `apply_layout` would fail with `NotInConfigMode` instead of the
+        // error belonging to this call.
+        let mut in_config = false;
+        for _ in 0..80 {
+            if CiCon(self.bus.read_sfr32(addr::C1CON).await?).op_mode()
+                == OperationMode::Configuration
+            {
+                in_config = true;
+                break;
+            }
+            delay.delay_us(100).await;
+        }
+        if !in_config {
+            return Err(Error::ModeChangeTimeout);
+        }
 
         // All interrupt flags cleared, all enables off.
         self.bus.write_sfr32(addr::C1INT, 0).await?;
@@ -461,10 +486,14 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         if !sta.not_full_or_not_empty() {
             return Err(Error::TxFifoFull);
         }
-        // `UA` (bits 11:0) is the register field width; validate it against
-        // the actual RAM size separately.
-        let ua = self.bus.read_sfr32(addr::fifo_ua(fifo)).await? & 0xFFF;
-        if ua as usize >= addr::RAM_SIZE {
+        // Validate the *raw* read before narrowing to `UA` (bits 11:0):
+        // masking first would fold a corrupt value like 0x0000_1000 into a
+        // plausible 0 and write the wrong message object. Message objects are
+        // 32-bit aligned, so an unaligned `UA` is corrupt too -- and would
+        // trip the alignment `debug_assert` in `bus::write_ram`, or issue a
+        // RAM access the chip does not support in a release build.
+        let ua = self.bus.read_sfr32(addr::fifo_ua(fifo)).await?;
+        if ua >= addr::RAM_SIZE as u32 || ua % 4 != 0 {
             return Err(Error::CommunicationCheckFailed);
         }
         // 8 header bytes + payload zero-padded to a 32-bit boundary.
@@ -527,13 +556,12 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         if !sta.not_full_or_not_empty() {
             return Err(Error::RxFifoEmpty);
         }
-        // `UA` (bits 11:0) is the register field width; validate it against
-        // the actual RAM size separately (see `transmit_raw`). Every RX
-        // object starts with an 8-byte header, so a `UA` above
-        // `RAM_SIZE - 8` is implausible and would make the header read below
-        // run past the end of message RAM on its own.
-        let ua = self.bus.read_sfr32(addr::fifo_ua(fifo)).await? & 0xFFF;
-        if ua as usize + 8 > addr::RAM_SIZE {
+        // Validated raw and for 32-bit alignment before narrowing, as in
+        // `transmit_raw`. Every RX object starts with an 8-byte header, so a
+        // `UA` above `RAM_SIZE - 8` is implausible and would make the header
+        // read below run past the end of message RAM on its own.
+        let ua = self.bus.read_sfr32(addr::fifo_ua(fifo)).await?;
+        if ua % 4 != 0 || ua as usize + 8 > addr::RAM_SIZE {
             return Err(Error::CommunicationCheckFailed);
         }
         let base = addr::RAM_START + ua as u16;

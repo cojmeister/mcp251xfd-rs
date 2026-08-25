@@ -91,6 +91,7 @@ pub struct FifoLayout {
 
 impl FifoLayout {
     /// An empty layout.
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             entries: [None; 31],
@@ -157,6 +158,7 @@ impl FifoLayout {
     /// Panics if the layout would exceed RAM, the depth is out of range, or
     /// the FIFO is already configured. In a `const` context the panic is a
     /// compile error — declare layouts as `const` to get build-time checking.
+    #[must_use]
     pub const fn tx_fifo(self, fifo: Fifo, payload: PayloadSize, depth: u8) -> Self {
         match self.try_tx_fifo(fifo, payload, depth) {
             Ok(l) => l,
@@ -167,6 +169,7 @@ impl FifoLayout {
     }
 
     /// Adds a receive FIFO. Panics like [`Self::tx_fifo`].
+    #[must_use]
     pub const fn rx_fifo(self, fifo: Fifo, payload: PayloadSize, depth: u8) -> Self {
         match self.try_rx_fifo(fifo, payload, depth) {
             Ok(l) => l,
