@@ -261,8 +261,8 @@ pub fn init_board_blocking() -> ([BlockingDevice; 10], UsbDriver, CORE1) {
 ///
 /// [`Bus`] uses [`NoopRawMutex`], which is deliberately not `Sync`, so devices
 /// built on it cannot be moved to the second core. The bench binaries that run
-/// the **async** driver on core 1 -- the configuration the field fault was
-/// reported under -- need `Send` devices, hence this parallel set.
+/// the **async** driver on core 1 -- the configuration the stall appears
+/// under -- need `Send` devices, hence this parallel set.
 pub type AsyncCsBus = Mutex<CriticalSectionRawMutex, Spi<'static, SPI1, Async>>;
 
 /// The cross-core-capable counterpart of [`Device`].

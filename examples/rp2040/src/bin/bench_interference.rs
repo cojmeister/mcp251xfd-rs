@@ -3,11 +3,11 @@
 //!
 //! # Why this exists
 //!
-//! `bench_async` runs the field-faulting configuration -- async driver on core
+//! `bench_async` runs the configuration the stall appears under -- async on core
 //! 1, so its SPI DMA completions are serviced on core 0 -- and did **not**
 //! fault: 76,000 cycles and 77,000 received frames, zero stalls. The reason is
 //! that core 0 was idle, so it serviced `DMA_IRQ_0` the instant it fired. The
-//! field rig's core 0 was busy running a flight-control cycle.
+//! core 0 that is busy with its own real-time work does not.
 //!
 //! That missing variable is the whole mechanism, and it can be controlled
 //! rather than approximated. MCP2517FD errata DS80000792D item 1 says the chip
@@ -23,7 +23,7 @@
 //! and faults should appear as `D` crosses ~10 us, and not below it.
 //!
 //! A clean step in that sweep is a quantitative confirmation of the erratum on
-//! silicon -- considerably stronger evidence than the field report's
+//! silicon -- considerably stronger evidence than an
 //! observational correlation. A flat zero across the whole sweep refutes the
 //! nCS-delay mechanism and sends the investigation elsewhere. Either outcome is
 //! worth having; that is what makes this the right experiment.

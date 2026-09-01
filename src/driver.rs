@@ -920,7 +920,7 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// is four times the 2 ms cycle budget this method exists to fit inside;
     /// a caller on a hard real-time deadline (e.g.
     /// `examples/rp2040/src/bin/blocking_core1.rs`, which calls this inside a
-    /// 500 Hz loop) should budget for the timeout path, not just the typical
+    /// 2 ms loop) should budget for the timeout path, not just the typical
     /// one.
     ///
     /// Queued frames are preserved. Use [`Self::reset_fifo`] instead only

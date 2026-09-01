@@ -1,9 +1,9 @@
-//! **The field-faulting configuration**: the *async* driver on core 1.
+//! **The configuration the stall appears under**: the *async* driver on core 1.
 //!
 //! This is the missing middle of the experiment matrix. `stall` is single-core
 //! async (DMA completions land on the core that issued them) and
-//! `blocking_core1` raises no DMA completion at all. Neither recreates what the
-//! field report describes, which is:
+//! `blocking_core1` raises no DMA completion at all. Neither recreates the
+//! configuration the fault appears under, which is:
 //!
 //! | configuration | SPI DMA completion serviced on | expectation |
 //! |---|---|---|
@@ -28,7 +28,7 @@
 //! other nine are initialised and then left in **Configuration mode**: they
 //! generate no CAN traffic (so they cannot go bus-off unacknowledged and flood
 //! the log) but they are still polled over SPI every cycle, which reproduces
-//! the ten-chip SPI bus occupancy the field report ran with. That occupancy
+//! the ten-chip SPI bus occupancy the fault was seen under. That occupancy
 //! matters: the erratum is about SPI holding the CAN FSM off the RAM.
 //!
 //! Feed the bussed chip from the Pi so `receive` actually runs -- only
@@ -228,7 +228,7 @@ async fn init_chip(can: &mut Can, bussed: bool) -> Result<(), common::CanError> 
 #[embassy_executor::task]
 async fn report_task() {
     common::wait_for_host().await;
-    info!("bench_async: ASYNC driver on core 1 (the field-faulting configuration)");
+    info!("bench_async: ASYNC driver on core 1 (the configuration the stall appears under)");
     info!("bussed chip = {BUSSED} (GP15); others held in Configuration mode as SPI load");
 
     let period = Duration::from_micros(CYCLE_US);

@@ -132,6 +132,8 @@ blocking driver is a fix for this fault and not merely a jitter improvement.
 
 ## Status
 
+v0.2 adds, on top of v0.1: raw and typed register read-back (`read_register_raw`, `write_register_raw`, `control_register`, `fifo_config`, `fifo_user_address`, `read_back_config`), `reset_fifo`, `recover_system_error`, `transmit_batch`, and a per-frame SPI transaction saving in `transmit`/`receive` (4 to 3, and 5 to 4 respectively) from fetching a FIFO's status and user address in one read.
+
 v0.1: reset/init, oscillator setup with variant detection, bit timing, FIFO layout, acceptance filters, classic + FD transmit, receive, interrupt flags/events, error counters, and an async `wait_rx` helper on the nINT pin.
 
 Validated on hardware — a board carrying ten MCP2517FDs on one shared SPI bus — via the [hardware examples](#hardware-examples): init and variant detection on all ten chips, the measured on-wire bit rate, classic and FD-64 internal loopback, real-bus traffic between two and three nodes, 29-bit identifiers, masked acceptance filters, remote frames, multi-FIFO layouts, and a 43,000-frame soak with no corruption and no bus errors.

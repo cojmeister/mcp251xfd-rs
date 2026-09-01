@@ -13,8 +13,8 @@
 //! interrupt, so the gap between the last SPI byte and nCS rising is bounded by
 //! core 1's own instruction stream rather than by whenever core 0 gets around
 //! to servicing `DMA_IRQ_0`. If `bench_async` faults under this load and this
-//! binary does not, the cross-core DMA interrupt is the mechanism, and items 3
-//! and 4 of the field report are one defect rather than two.
+//! binary does not, the cross-core DMA interrupt is the mechanism, and the stall and the
+//! cross-core jitter are one defect rather than two.
 //!
 //! A null result here is only meaningful if `bench_async` faulted first — read
 //! them as a pair, never alone.

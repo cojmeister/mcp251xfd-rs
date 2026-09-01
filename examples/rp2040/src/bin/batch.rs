@@ -1,6 +1,6 @@
 //! Times `transmit` in a loop against `transmit_batch`, ten chips, three
 //! frames each, `CYCLES` times back to back with no pacing between
-//! iterations -- a throughput measurement, not a reproduction of the 500 Hz
+//! iterations -- a throughput measurement, not a reproduction of a paced
 //! cycle that motivated the API.
 //!
 //! Both should come out the same: after the paired status/user-address read,
@@ -35,7 +35,7 @@ use panic_halt as _;
 const TX: Fifo = Fifo::F1;
 const RX: Fifo = Fifo::F2;
 
-/// Depth 16, as in the field deployment: three frames per cycle cannot fill
+/// Depth 16: three frames per cycle cannot fill
 /// a FIFO that drains within the cycle.
 const LAYOUT: FifoLayout =
     FifoLayout::new()
