@@ -173,7 +173,7 @@ parity remains automatic.
 | `control_register() -> CiCon` | 1 | 1 |
 | `fifo_config(fifo) -> CiFifoCon` | 1 | 1, 2 |
 | `fifo_user_address(fifo) -> u32` | 1 | 1 |
-| `read_back_config() -> ChipConfig` | 4 | 1 |
+| `read_back_config() -> ChipConfig` | 2 | 1 |
 | `reset_fifo(fifo)` | 1 | 3 |
 | `recover_system_error(mode, delay) -> bool` | ~3 + mode poll | 3 |
 | `transmit_batch(fifo, &[Frame]) -> u8` | 3N | 5 |
@@ -185,7 +185,9 @@ state tracking and that writing configuration registers through them can
 desynchronise the driver from the chip.
 
 `ChipConfig` is a plain struct of `CiCon`, `CiNbtCfg`, `CiDbtCfg`, `CiTdc` so
-"what I asked for" can be diffed against "what the chip has". It is defined
+"what I asked for" can be diffed against "what the chip has". `C1CON`/
+`C1NBTCFG` and `C1DBTCFG`/`C1TDC` are two adjacent pairs, so `read_back_config`
+costs two transactions rather than four. It is defined
 in `driver.rs` alongside `Event` and re-exported from `lib.rs`. `CiNbtCfg`,
 `CiDbtCfg` and `CiTdc` are already public in `registers`, but are not
 currently re-exported at the crate root; this change adds them, since a
@@ -280,8 +282,8 @@ blocking case; no existing function is modified.
 | Binary | Purpose |
 | --- | --- |
 | `regdump.rs` | Dumps configuration registers across all ten chips using the new raw and typed accessors; diffs `read_back_config()` against the `Config` that was applied. |
-| `stall.rs` | Drives the receive-then-echo load that reproduces the fault, detects the `OPMOD` transition into Restricted/Listen Only, and times four recovery ladders head-to-head: clear-flags-only, `recover_system_error`, `reset_fifo`, and the full mode cycle. Validates the root cause on hardware. |
-| `blocking_core1.rs` | Blocking driver on core 1 via `embassy-rp` multicore with a shared-bus `SpiDevice`, measuring cycle jitter on core 0. Tests the prediction that removing the cross-core DMA interrupt removes the stall. |
+| `stall.rs` | Drives the receive-then-echo load that reproduces the fault, detects the `OPMOD` transition into Restricted/Listen Only, and times four recovery ladders head-to-head: clear-flags-only, `recover_system_error`, `reset_fifo`, and the full mode cycle. Validates the root cause on hardware. **Needs the CAN bus wired**: it must run `Normal20`, because FRM Figure 2-1 shows the System Error transition leaving the *Normal* modes and internal loopback is a *Debug* mode — a loopback run would prove nothing either way. |
+| `blocking_core1.rs` | Blocking driver on core 1 via `embassy-rp` multicore with a shared-bus `SpiDevice`, measuring cycle jitter on core 0 and counting stalls the same way `stall.rs` does. Tests the prediction that removing the cross-core DMA interrupt removes the stall. **Needs the CAN bus wired**, and runs `Normal20` so its count is directly comparable with `stall.rs`. |
 | `batch.rs` | Measures `transmit` versus `transmit_batch` transaction count and cycle cost. |
 
 ## 6. Testing
