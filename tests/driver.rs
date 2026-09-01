@@ -545,6 +545,63 @@ fn interrupts_and_events() {
     spi.done();
 }
 
+#[test]
+fn recover_system_error_restores_normal_mode_from_restricted() {
+    let mut e = Vec::new();
+    // CiCON reports OPMOD = 7 (Restricted Operation) after a TX MAB underflow.
+    e.extend(r32(0x000, 0x00E0_0020));
+    // Clear SERRIF (12), MODIF (3) and IVMIF (15), write-0-to-clear, flag
+    // half only: byte 0 = !0x08 = 0xF7, byte 1 = !0x90 = 0x6F.
+    e.extend(w8(0x01C, 0xF7));
+    e.extend(w8(0x01D, 0x6F));
+    // set_mode: read-modify-write REQOP, then poll OPMOD. `with_req_op_mode`
+    // only touches bits 26:24, so the OPMOD bits 23:21 that were just read
+    // (7 << 21 = 0x00E0_0000) are written straight back.
+    e.extend(r32(0x000, 0x00E0_0020));
+    e.extend(w32(0x000, 0x06E0_0020)); // REQOP := 6 (Normal20), OPMOD preserved
+    e.extend(r32(0x000, 0x06C0_0020)); // OPMOD = 6, reached
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert!(
+        can.recover_system_error(OperationMode::Normal20, &mut NoopDelay)
+            .unwrap()
+    );
+    spi.done();
+}
+
+#[test]
+fn recover_system_error_is_a_no_op_when_the_mode_is_healthy() {
+    let mut e = Vec::new();
+    // OPMOD = 6 (Normal20): nothing to recover, and nothing must be written.
+    e.extend(r32(0x000, 0x00C0_0020));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert!(
+        !can.recover_system_error(OperationMode::Normal20, &mut NoopDelay)
+            .unwrap()
+    );
+    spi.done();
+}
+
+#[test]
+fn recover_system_error_also_handles_the_listen_only_fallback() {
+    // With CiCON.SERR2LOM set the chip drops into Listen Only instead.
+    let mut e = Vec::new();
+    e.extend(r32(0x000, 0x0060_0020)); // OPMOD = 3 (ListenOnly)
+    e.extend(w8(0x01C, 0xF7));
+    e.extend(w8(0x01D, 0x6F));
+    e.extend(r32(0x000, 0x0060_0020));
+    e.extend(w32(0x000, 0x0660_0020)); // REQOP := 6, OPMOD (3 << 21) preserved
+    e.extend(r32(0x000, 0x06C0_0020));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert!(
+        can.recover_system_error(OperationMode::Normal20, &mut NoopDelay)
+            .unwrap()
+    );
+    spi.done();
+}
+
 /// A `CiFIFOUA` read whose value is not 32-bit aligned is corrupt: message
 /// objects always start on a word boundary. Before this was checked, an
 /// unaligned address reached `bus::write_ram`, tripping its alignment

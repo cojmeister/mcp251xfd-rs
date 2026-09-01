@@ -802,6 +802,58 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     pub async fn error_counters(&mut self) -> Result<CiTrec, Error<SPI::Error>> {
         Ok(CiTrec(self.bus.read_sfr32(addr::C1TREC).await?))
     }
+
+    /// Recovers from a system error that parked the chip in Restricted
+    /// Operation or Listen Only mode, returning whether it needed to.
+    ///
+    /// Reads `CiCON`. If `OPMOD` is neither
+    /// [`OperationMode::RestrictedOperation`] nor
+    /// [`OperationMode::ListenOnly`], returns `Ok(false)` having issued no
+    /// writes. Otherwise it clears `SERRIF`, `MODIF` and `IVMIF`, requests
+    /// `mode`, and returns `Ok(true)`.
+    ///
+    /// Flags are cleared *before* the mode request so a second system error
+    /// during recovery latches a fresh `SERRIF` instead of hiding behind the
+    /// stale one.
+    ///
+    /// # Why this exists
+    ///
+    /// On the MCP2517FD a TX MAB underflow (DS80000792D item 1) parks the
+    /// chip here. Both modes ignore `TXREQ`, so the TX FIFO fills and stops
+    /// draining while `CiTREC` stays completely clean — no `TEC`, no `REC`,
+    /// no bus-off — which makes it look nothing like a bus fault. Clearing
+    /// the interrupt flags does not help: the flags are not what is wrong,
+    /// the operation mode is. The erratum's own recovery is to request Normal
+    /// mode, after which the chip retransmits the offending message by
+    /// itself, and it states that resetting the device is not necessary.
+    ///
+    /// `mode` is explicit rather than remembered, because the driver keeps no
+    /// record of the mode it last requested. Pass the Normal mode the
+    /// application was running in. Per DS20005678E Figure 2-1 the transition
+    /// out of Restricted Operation and Listen Only is a direct edge to the
+    /// Normal modes, so no Configuration-mode round trip is needed and the
+    /// cost is a few SPI transactions plus bus re-integration (11 consecutive
+    /// recessive bits).
+    ///
+    /// Queued frames are preserved. Use [`Self::reset_fifo`] instead only
+    /// when the queue contents should be discarded.
+    pub async fn recover_system_error<D: DelayNs>(
+        &mut self,
+        mode: OperationMode,
+        delay: &mut D,
+    ) -> Result<bool, Error<SPI::Error>> {
+        let con = CiCon(self.bus.read_sfr32(addr::C1CON).await?);
+        if !matches!(
+            con.op_mode(),
+            OperationMode::RestrictedOperation | OperationMode::ListenOnly
+        ) {
+            return Ok(false);
+        }
+        self.clear_interrupts(CiInt(0).with_serrif(true).with_modif(true).with_ivmif(true))
+            .await?;
+        self.set_mode(mode, delay).await?;
+        Ok(true)
+    }
 }
 
 /// Async-only conveniences built on the interrupt pin.
