@@ -101,7 +101,6 @@ impl<SPI: SpiDevice> Bus<SPI> {
     ///
     /// Halves the chip-select count wherever the driver needs a status
     /// register and the user address that follows it.
-    #[allow(dead_code)] // TODO: remove when Task 3 lands and uses this.
     pub(crate) async fn read_sfr32_pair(
         &mut self,
         addr: u16,

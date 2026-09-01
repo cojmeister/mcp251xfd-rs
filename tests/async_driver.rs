@@ -29,11 +29,14 @@ impl embedded_hal_async::digital::Wait for ReadyPin {
     }
 }
 
-fn r32(addr: u16, val: u32) -> Vec<Transaction<u8>> {
+/// One READ transaction returning two consecutive 32-bit registers.
+fn r32_pair(addr: u16, lo: u32, hi: u32) -> Vec<Transaction<u8>> {
+    let mut data = lo.to_le_bytes().to_vec();
+    data.extend_from_slice(&hi.to_le_bytes());
     vec![
         Transaction::transaction_start(),
         Transaction::write_vec(vec![0x30 | (addr >> 8) as u8, (addr & 0xFF) as u8]),
-        Transaction::read_vec(val.to_le_bytes().to_vec()),
+        Transaction::read_vec(data),
         Transaction::transaction_end(),
     ]
 }
@@ -59,9 +62,9 @@ fn w8(addr: u16, val: u8) -> Vec<Transaction<u8>> {
 #[tokio::test]
 async fn wait_rx_polls_until_frame_arrives() {
     let mut e = Vec::new();
-    e.extend(r32(0x06C, 0x0000_0000)); // empty -> waits on the pin once
-    e.extend(r32(0x06C, 0x0000_0001)); // now a frame is there
-    e.extend(r32(0x070, 0x0000_0000));
+    // The user address is fetched in the same transaction and then discarded.
+    e.extend(r32_pair(0x06C, 0x0000_0000, 0x0000_0000)); // empty -> waits on the pin once
+    e.extend(r32_pair(0x06C, 0x0000_0001, 0x0000_0000)); // now a frame is there
     e.extend(rram(
         0x400,
         &[0x23, 0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00],
@@ -81,7 +84,8 @@ async fn wait_rx_polls_until_frame_arrives() {
 #[tokio::test]
 async fn async_receive_empty_errors() {
     let mut e = Vec::new();
-    e.extend(r32(0x06C, 0x0000_0000));
+    // The user address is fetched in the same transaction and then discarded.
+    e.extend(r32_pair(0x06C, 0x0000_0000, 0x0000_0000));
     let mut spi = Mock::new(&e);
     let mut can = MCP251xFdAsync::new(&mut spi);
     assert!(matches!(

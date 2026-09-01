@@ -482,8 +482,11 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         mut header: TxHeader,
         payload: &[u8],
     ) -> Result<(), Error<SPI::Error>> {
-        let sta = CiFifoSta(self.bus.read_sfr32(addr::fifo_sta(fifo)).await?);
-        if !sta.not_full_or_not_empty() {
+        // `CiFIFOUA` sits directly above `CiFIFOSTA` (0x05C + 12(m-1) + 4 and
+        // + 8), so one 8-byte READ fetches both and the readiness check costs
+        // no chip-select assertion of its own.
+        let (sta_raw, ua) = self.bus.read_sfr32_pair(addr::fifo_sta(fifo)).await?;
+        if !CiFifoSta(sta_raw).not_full_or_not_empty() {
             return Err(Error::TxFifoFull);
         }
         // Validate the *raw* read before narrowing to `UA` (bits 11:0):
@@ -492,7 +495,6 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         // 32-bit aligned, so an unaligned `UA` is corrupt too -- and would
         // trip the alignment `debug_assert` in `bus::write_ram`, or issue a
         // RAM access the chip does not support in a release build.
-        let ua = self.bus.read_sfr32(addr::fifo_ua(fifo)).await?;
         if ua >= addr::RAM_SIZE as u32 || ua % 4 != 0 {
             return Err(Error::CommunicationCheckFailed);
         }
@@ -552,15 +554,14 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// identifier, DLC and payload — *and* still writes `UINC`, advancing
     /// the transmit FIFO's tail past an element the chip has not sent.
     pub async fn receive(&mut self, fifo: Fifo) -> Result<RxFrame, Error<SPI::Error>> {
-        let sta = CiFifoSta(self.bus.read_sfr32(addr::fifo_sta(fifo)).await?);
-        if !sta.not_full_or_not_empty() {
+        let (sta_raw, ua) = self.bus.read_sfr32_pair(addr::fifo_sta(fifo)).await?;
+        if !CiFifoSta(sta_raw).not_full_or_not_empty() {
             return Err(Error::RxFifoEmpty);
         }
         // Validated raw and for 32-bit alignment before narrowing, as in
         // `transmit_raw`. Every RX object starts with an 8-byte header, so a
         // `UA` above `RAM_SIZE - 8` is implausible and would make the header
         // read below run past the end of message RAM on its own.
-        let ua = self.bus.read_sfr32(addr::fifo_ua(fifo)).await?;
         if ua % 4 != 0 || ua as usize + 8 > addr::RAM_SIZE {
             return Err(Error::CommunicationCheckFailed);
         }

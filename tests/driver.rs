@@ -30,6 +30,18 @@ fn r32(addr: u16, val: u32) -> Vec<Transaction<u8>> {
     ]
 }
 
+/// One READ transaction returning two consecutive 32-bit registers.
+fn r32_pair(addr: u16, lo: u32, hi: u32) -> Vec<Transaction<u8>> {
+    let mut data = lo.to_le_bytes().to_vec();
+    data.extend_from_slice(&hi.to_le_bytes());
+    vec![
+        Transaction::transaction_start(),
+        Transaction::write_vec(vec![0x30 | (addr >> 8) as u8, (addr & 0xFF) as u8]),
+        Transaction::read_vec(data),
+        Transaction::transaction_end(),
+    ]
+}
+
 fn wram(addr: u16, data: &[u8]) -> Vec<Transaction<u8>> {
     vec![
         Transaction::transaction_start(),
@@ -240,8 +252,7 @@ fn transmit_classic_frame() {
     let frame = Frame::new(StandardId::new(0x123).unwrap(), &[1, 2, 3, 4]).unwrap();
     let mut e = Vec::new();
     // First transmit: seq 0.
-    e.extend(r32(0x060, 0x0000_0001)); // CiFIFOSTA1: not full
-    e.extend(r32(0x064, 0x0000_0000)); // CiFIFOUA1: offset 0
+    e.extend(r32_pair(0x060, 0x0000_0001, 0x0000_0000)); // CiFIFOSTA1: not full, CiFIFOUA1: offset 0
     e.extend(wram(
         0x400,
         &[
@@ -252,8 +263,7 @@ fn transmit_classic_frame() {
     ));
     e.extend(w8(0x05D, 0x03)); // CiFIFOCON1 byte1: UINC | TXREQ
     // Second transmit: seq increments, chip UA advanced to 0x10.
-    e.extend(r32(0x060, 0x0000_0001));
-    e.extend(r32(0x064, 0x0000_0010));
+    e.extend(r32_pair(0x060, 0x0000_0001, 0x0000_0010));
     e.extend(wram(
         0x410,
         &[
@@ -273,7 +283,8 @@ fn transmit_classic_frame() {
 fn transmit_full_fifo_errors() {
     let frame = Frame::new(StandardId::new(0x123).unwrap(), &[]).unwrap();
     let mut e = Vec::new();
-    e.extend(r32(0x060, 0x0000_0000)); // full: TFNRFNIF clear
+    // The user address is fetched in the same transaction and then discarded.
+    e.extend(r32_pair(0x060, 0x0000_0000, 0x0000_0000)); // full: TFNRFNIF clear
     let mut spi = Mock::new(&e);
     let mut can = MCP251xFd::new(&mut spi);
     assert!(matches!(
@@ -298,8 +309,7 @@ fn transmit_fd_frame_with_brs() {
     )
     .unwrap();
     let mut e = Vec::new();
-    e.extend(r32(0x060, 0x0000_0001));
-    e.extend(r32(0x064, 0x0000_0000));
+    e.extend(r32_pair(0x060, 0x0000_0001, 0x0000_0000));
     // T1 = DLC 9 | BRS(1<<6) | FDF(1<<7) | SEQ 0 = 0xC9.
     let mut obj = vec![0x7F, 0x00, 0x00, 0x00, 0xC9, 0x00, 0x00, 0x00];
     obj.extend_from_slice(frame.data());
@@ -318,8 +328,7 @@ fn transmit_rejects_out_of_range_ua() {
     // CiFIFOCON traffic should follow.
     let frame = Frame::new(StandardId::new(0x123).unwrap(), &[1, 2, 3, 4]).unwrap();
     let mut e = Vec::new();
-    e.extend(r32(0x060, 0x0000_0001)); // not full
-    e.extend(r32(0x064, 0x0000_0800)); // UA == RAM_SIZE: out of range
+    e.extend(r32_pair(0x060, 0x0000_0001, 0x0000_0800)); // not full; UA == RAM_SIZE: out of range
     let mut spi = Mock::new(&e);
     let mut can = MCP251xFd::new(&mut spi);
     assert!(matches!(
@@ -342,8 +351,7 @@ fn transmit_rejects_object_running_past_end_of_ram() {
     )
     .unwrap();
     let mut e = Vec::new();
-    e.extend(r32(0x060, 0x0000_0001)); // not full
-    e.extend(r32(0x064, 0x0000_07C0)); // UA + 72 > RAM_SIZE
+    e.extend(r32_pair(0x060, 0x0000_0001, 0x0000_07C0)); // not full; UA + 72 > RAM_SIZE
     let mut spi = Mock::new(&e);
     let mut can = MCP251xFd::new(&mut spi);
     assert!(matches!(
@@ -361,8 +369,7 @@ fn receive_zeroes_stale_padding_bytes() {
     // occupied this RAM slot before and must not reach the frame, or the
     // derived PartialEq/Debug compare and print bus leftovers.
     let mut e = Vec::new();
-    e.extend(r32(0x06C, 0x0000_0001)); // CiFIFOSTA2: not empty
-    e.extend(r32(0x070, 0x0000_0020)); // CiFIFOUA2: offset 0x20
+    e.extend(r32_pair(0x06C, 0x0000_0001, 0x0000_0020)); // CiFIFOSTA2: not empty, CiFIFOUA2: offset 0x20
     e.extend(rram(
         0x420,
         &[0x23, 0x01, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00],
@@ -394,8 +401,7 @@ fn receive_remote_frame_skips_payload_and_stays_zeroed() {
     // Mock::done() fails if one is issued, and the frame must equal
     // Frame::new_remote's all-zero-array construction.
     let mut e = Vec::new();
-    e.extend(r32(0x06C, 0x0000_0001)); // CiFIFOSTA2: not empty
-    e.extend(r32(0x070, 0x0000_0020)); // CiFIFOUA2: offset 0x20
+    e.extend(r32_pair(0x06C, 0x0000_0001, 0x0000_0020)); // CiFIFOSTA2: not empty, CiFIFOUA2: offset 0x20
     e.extend(rram(
         0x420,
         &[0x23, 0x01, 0x00, 0x00, 0x24, 0x00, 0x00, 0x00],
@@ -419,8 +425,7 @@ fn receive_remote_frame_skips_payload_and_stays_zeroed() {
 #[test]
 fn receive_classic_frame() {
     let mut e = Vec::new();
-    e.extend(r32(0x06C, 0x0000_0001)); // CiFIFOSTA2: not empty
-    e.extend(r32(0x070, 0x0000_00A0)); // CiFIFOUA2: offset 0xA0
+    e.extend(r32_pair(0x06C, 0x0000_0001, 0x0000_00A0)); // CiFIFOSTA2: not empty, CiFIFOUA2: offset 0xA0
     e.extend(rram(
         0x4A0,
         &[0x23, 0x01, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00],
@@ -444,8 +449,7 @@ fn receive_classic_frame() {
 #[test]
 fn receive_fd_frame() {
     let mut e = Vec::new();
-    e.extend(r32(0x06C, 0x0000_0001));
-    e.extend(r32(0x070, 0x0000_0000));
+    e.extend(r32_pair(0x06C, 0x0000_0001, 0x0000_0000));
     // R1 = DLC 9 | BRS(1<<6) | FDF(1<<7) = 0xC9 -> 12 payload bytes.
     e.extend(rram(
         0x400,
@@ -475,7 +479,8 @@ fn receive_fd_frame() {
 #[test]
 fn receive_empty_fifo_errors() {
     let mut e = Vec::new();
-    e.extend(r32(0x06C, 0x0000_0000));
+    // The user address is fetched in the same transaction and then discarded.
+    e.extend(r32_pair(0x06C, 0x0000_0000, 0x0000_0000));
     let mut spi = Mock::new(&e);
     let mut can = MCP251xFd::new(&mut spi);
     assert!(matches!(can.receive(Fifo::F2), Err(Error::RxFifoEmpty)));
@@ -487,8 +492,7 @@ fn receive_rejects_out_of_range_ua() {
     // FIFO not empty, but CiFIFOUA reads back >= message RAM size (0x800):
     // implausible. No RAM or CiFIFOCON traffic should follow.
     let mut e = Vec::new();
-    e.extend(r32(0x06C, 0x0000_0001)); // not empty
-    e.extend(r32(0x070, 0x0000_0800)); // UA == RAM_SIZE: out of range
+    e.extend(r32_pair(0x06C, 0x0000_0001, 0x0000_0800)); // not empty; UA == RAM_SIZE: out of range
     let mut spi = Mock::new(&e);
     let mut can = MCP251xFd::new(&mut spi);
     assert!(matches!(
@@ -504,8 +508,7 @@ fn receive_rejects_ua_too_close_to_ram_top_for_a_header() {
     // hold one is RAM_SIZE - 8 = 0x7F8. At 0x7F9 the header read alone would
     // run past the end of message RAM; reject before issuing it.
     let mut e = Vec::new();
-    e.extend(r32(0x06C, 0x0000_0001)); // not empty
-    e.extend(r32(0x070, 0x0000_07F9)); // UA + 8 > RAM_SIZE by one byte
+    e.extend(r32_pair(0x06C, 0x0000_0001, 0x0000_07F9)); // not empty; UA + 8 > RAM_SIZE by one byte
     let mut spi = Mock::new(&e);
     let mut can = MCP251xFd::new(&mut spi);
     assert!(matches!(
@@ -552,8 +555,7 @@ fn interrupts_and_events() {
 fn transmit_rejects_unaligned_fifo_user_address() {
     let frame = Frame::new(StandardId::new(0x123).unwrap(), &[1, 2, 3, 4]).unwrap();
     let mut e = Vec::new();
-    e.extend(r32(0x060, 0x0000_0001)); // not full
-    e.extend(r32(0x064, 0x0000_0002)); // UA = 2: not word-aligned
+    e.extend(r32_pair(0x060, 0x0000_0001, 0x0000_0002)); // not full; UA = 2: not word-aligned
     let mut spi = Mock::new(&e);
     let mut can = MCP251xFd::new(&mut spi);
     assert_eq!(
@@ -567,8 +569,7 @@ fn transmit_rejects_unaligned_fifo_user_address() {
 #[test]
 fn receive_rejects_unaligned_fifo_user_address() {
     let mut e = Vec::new();
-    e.extend(r32(0x06C, 0x0000_0001)); // CiFIFOSTA2: not empty
-    e.extend(r32(0x070, 0x0000_0006)); // UA = 6: not word-aligned
+    e.extend(r32_pair(0x06C, 0x0000_0001, 0x0000_0006)); // CiFIFOSTA2: not empty; UA = 6: not word-aligned
     let mut spi = Mock::new(&e);
     let mut can = MCP251xFd::new(&mut spi);
     assert_eq!(
@@ -584,9 +585,8 @@ fn receive_rejects_unaligned_fifo_user_address() {
 fn transmit_rejects_out_of_range_fifo_user_address() {
     let frame = Frame::new(StandardId::new(0x123).unwrap(), &[1, 2, 3, 4]).unwrap();
     let mut e = Vec::new();
-    e.extend(r32(0x060, 0x0000_0001));
     // 0x1000 masks to 0x000 with `& 0xFFF` -- previously accepted as offset 0.
-    e.extend(r32(0x064, 0x0000_1000));
+    e.extend(r32_pair(0x060, 0x0000_0001, 0x0000_1000));
     let mut spi = Mock::new(&e);
     let mut can = MCP251xFd::new(&mut spi);
     assert_eq!(
