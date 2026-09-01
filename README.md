@@ -80,10 +80,12 @@ issued the transfer.
 The RP2040 under `embassy-rp` is that case: `DMA_IRQ_0` is enabled in
 whichever core calls `embassy_rp::init` (core 0), `DMA_IRQ_1` is never used,
 so core 1's SPI DMA completions are serviced on core 0 at an unpredictable
-phase. Blocking removes the interrupt entirely and frees two DMA channels, and
-for the 3–18 byte transfers this driver issues, DMA setup overhead dominates
-anyway. See the crate docs for the full explanation, and
-`examples/rp2040/src/bin/blocking_core1.rs` for a worked setup.
+phase. Blocking removes *this driver's own* cross-core interrupt — the SPI DMA
+completion — and frees two DMA channels, and for the 3–18 byte transfers this
+driver issues, DMA setup overhead dominates anyway. The core may still receive
+other cross-core interrupts (for example, a timer IRQ). See the crate docs for
+the full explanation, and `examples/rp2040/src/bin/blocking_core1.rs` for a
+worked setup.
 
 ## Known hardware anomalies
 
