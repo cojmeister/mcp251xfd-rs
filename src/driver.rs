@@ -349,6 +349,21 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// configured: their register contents are left as they were, and they
     /// still participate in the chip's RAM address generation alongside
     /// the new layout's FIFOs.
+    ///
+    /// # `FRESET` side effect
+    ///
+    /// Every FIFO this writes is configured with `FRESET` asserted, so its
+    /// head and tail pointers and its `CiFIFOSTA` register are reset and
+    /// anything queued in it is discarded. **This is intentional and may be
+    /// relied on**: applying a layout to a FIFO that is mid-stream and
+    /// leaving its pointers where they were would leave the chip's idea of
+    /// the FIFO and the driver's disagreeing.
+    ///
+    /// It is, however, a blunt instrument for resetting a FIFO: it requires
+    /// Configuration mode and rewrites every FIFO's configuration.
+    /// [`Self::reset_fifo`] asserts `FRESET` on one FIFO in a single
+    /// transaction, in any mode, without touching configuration — prefer it
+    /// when a reset is all you want.
     pub async fn apply_layout(&mut self, layout: &FifoLayout) -> Result<(), Error<SPI::Error>> {
         let con = CiCon(self.bus.read_sfr32(addr::C1CON).await?);
         if con.op_mode() != OperationMode::Configuration {
@@ -418,6 +433,20 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// ([`Error::CommunicationCheckFailed`]). Size FIFOs for the frames
     /// they carry. Classic frames never exceed 8 bytes, so a `PLSIZE` of
     /// `PayloadSize::B8` or larger is always safe here.
+    ///
+    /// # A free slot is not a health signal
+    ///
+    /// [`Error::TxFifoFull`] means the FIFO is full; its absence means only
+    /// that a slot was free, **not** that anything is reaching the bus. A
+    /// controller can sit with free FIFO space and drain nothing — see the
+    /// crate-level "Known hardware anomalies" section, where exactly that
+    /// costs a stalled MCP2517FD its entire transmit path while `CiTREC`
+    /// still reads clean.
+    ///
+    /// To tell queued-and-moving from queued-and-wedged, read
+    /// [`Self::fifo_config`]'s `txreq` — the chip clears it when the FIFO
+    /// drains — or [`Self::fifo_status`]'s `tx_empty_or_rx_full`. Neither
+    /// costs a frame on the bus.
     pub async fn transmit(&mut self, fifo: Fifo, frame: &Frame) -> Result<(), Error<SPI::Error>> {
         let header = TxHeader {
             id: frame.id(),
@@ -486,6 +515,8 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// leave the 2048-byte message RAM entirely
     /// ([`Error::CommunicationCheckFailed`]). A 64-byte FD frame therefore
     /// needs `PayloadSize::B64`; size FIFOs for the frames they carry.
+    ///
+    /// A free slot is not a health signal; see [`Self::transmit`].
     pub async fn transmit_fd(
         &mut self,
         fifo: Fifo,
@@ -760,6 +791,13 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     }
 
     /// Reads a FIFO's status register.
+    ///
+    /// For a TX FIFO, `not_full_or_not_empty` reports only that a slot is
+    /// free. It does **not** report that frames are reaching the bus: a
+    /// stalled controller shows free space while draining nothing. Use
+    /// `tx_empty_or_rx_full` (the FIFO actually drained) or
+    /// [`Self::fifo_config`]'s `txreq` (frames still pending) for that, and
+    /// see the crate-level "Known hardware anomalies" section.
     pub async fn fifo_status(&mut self, fifo: Fifo) -> Result<CiFifoSta, Error<SPI::Error>> {
         Ok(CiFifoSta(self.bus.read_sfr32(addr::fifo_sta(fifo)).await?))
     }

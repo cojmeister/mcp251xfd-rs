@@ -7,18 +7,38 @@ use embedded_can::Id;
 
 /// The maximum safe SPI clock for a given SYSCLK: `0.85 * SYSCLK / 2`.
 ///
-/// All supported variants share this silicon erratum ("SPI writes/reads of
-/// the RAM can be corrupted"): MCP2517FD errata DS80000792 item 5,
-/// MCP2518FD errata DS80000789 (the MCP251863 uses the same die as the
-/// MCP2518FD, so the same item applies). The cap binds every variant, not
-/// just the MCP2517FD.
+/// This is a **correctness limit from silicon errata**, not a conservative
+/// guess. Every supported variant carries the anomaly, in mirrored forms:
 ///
-/// The driver cannot observe the actual SPI clock through `SpiDevice` — you
-/// must configure your bus at or below this cap yourself. Per the erratum,
-/// corruption only occurs with simultaneous CAN bus activity during a RAM
-/// read, so the init-time RAM echo test (no bus traffic, Configuration
-/// mode) only proves wiring and byte/word order; it cannot confirm erratum
-/// compliance at your chosen SPI clock.
+/// - MCP2517FD, DS80000792D item 5: "The SPI may read corrupted data from
+///   the RAM at fast SPI speeds."
+/// - MCP2518FD, DS80000789F item 4: "The SPI may write corrupted data to the
+///   RAM at fast SPI speeds." The MCP251863 uses the same die.
+///
+/// Both name the same fix: keep FSCK at or below `0.85 * (FSYSCLK/2)`. Both
+/// require simultaneous CAN bus activity to trigger, which is why the
+/// init-time RAM echo test (Configuration mode, no bus traffic) proves wiring
+/// and byte order but cannot confirm erratum compliance at your clock.
+///
+/// # Host HALs quantise downward
+///
+/// This returns a ceiling; your HAL picks the nearest achievable rate at or
+/// below it, so a scope on SCK will usually read *lower* than this number and
+/// that is correct. On an RP2040 the same 8.5 MHz ceiling (a 20 MHz SYSCLK)
+/// becomes 7.5 MHz at a 120 MHz `clk_peri` and 7.8125 MHz at 125 MHz.
+///
+/// The ceiling is real: on a ten-chip MCP2517FD board it was measured clean
+/// at every rate up to 12.5 MHz and corrupting at 15.625 MHz.
+///
+/// The driver cannot observe your actual SPI clock through `SpiDevice`, so
+/// sizing the bus is yours to do. Derive it from the same [`ClockConfig`] the
+/// chip uses and the two cannot drift:
+///
+/// ```
+/// # use mcp251xfd::{ClockConfig, max_spi_hz};
+/// let sysclk = ClockConfig::MHZ20.sysclk_hz();
+/// assert_eq!(max_spi_hz(sysclk), 8_500_000);
+/// ```
 pub const fn max_spi_hz(sysclk_hz: u32) -> u32 {
     (sysclk_hz / 2 / 100) * 85
 }

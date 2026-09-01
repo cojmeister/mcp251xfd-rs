@@ -19,6 +19,84 @@
 //! echo test and fails with
 //! [`Error::CommunicationCheckFailed`] on an over-clocked bus.
 //!
+//! # SPI mode
+//!
+//! The MCP251xFD requires **SPI mode (0,0)** — clock idle low, data sampled
+//! on the first (rising) edge. Set it explicitly. It happens to match the
+//! default `Config` on some HALs (`embassy-rp` among them), so an
+//! unconfigured bus will appear to work right up until you move to a HAL
+//! whose default differs, and then fail in a way that reads like a wiring
+//! fault.
+//!
+//! # Choosing blocking or async
+//!
+//! Both APIs are generated from one source, so they are feature-identical and
+//! the choice is purely about how the SPI transfer should wait.
+//!
+//! Prefer **async** when the core issuing SPI also runs other work: the await
+//! points let the executor do that work while a transfer is in flight.
+//!
+//! Prefer **blocking** when the core is dedicated to CAN, and specifically on
+//! **any target where DMA completion interrupts are serviced on a different
+//! core than the one that issued the transfer**. There the async path exports
+//! its completion cost to a core that did not ask for it, at a phase that
+//! core cannot predict.
+//!
+//! The RP2040 under `embassy-rp` is the common case, and it is surprising
+//! enough to name. `embassy_rp::init` calls `dma::init`, which enables
+//! `DMA_IRQ_0` in the calling core's NVIC — and `init` runs on core 0. The
+//! handler loops over all twelve DMA channels on every completion.
+//! `embassy-rp` does not use `DMA_IRQ_1`, so there is no second line to give
+//! core 1. Every SPI DMA completion raised by core 1 is therefore serviced on
+//! core 0, at arbitrary phase relative to core 0's own timing. A project
+//! running this driver on core 1 measured 23 late cycle starts per ten
+//! minutes on core 0 that a single-core build did not have.
+//!
+//! For a dedicated core the blocking driver is simply better: it removes the
+//! cross-core interrupt, frees two DMA channels, and for the 3-18 byte
+//! transfers this driver issues, DMA setup overhead dominates the transfer
+//! anyway. If the core has slack against its deadline, busy-waiting on the
+//! SPI FIFO costs it nothing it needs.
+//!
+//! There is a correctness dimension too — see the next section.
+//!
+//! # Known hardware anomalies
+//!
+//! ## MCP2517FD: transmit stalls under a receive-heavy load
+//!
+//! On the **MCP2517FD only** (DS80000792D item 1; the MCP2518FD and
+//! MCP251863 errata carry no equivalent), the SPI interface can block the CAN
+//! FSM from reaching RAM during an SPI **READ** that accesses message RAM —
+//! in the gaps between bytes, and between the last byte and nCS rising. Held
+//! off for longer than T_SPIMAXDLY, the chip suffers a TX MAB underflow.
+//!
+//! The signature is distinctive, and it looks nothing like a bus fault:
+//!
+//! | Where | What you see |
+//! |---|---|
+//! | `CiINT` | `SERRIF` (12) latched, usually with `MODIF` (3) and `IVMIF` (15) |
+//! | `CiCON.OPMOD` | Restricted Operation, or Listen Only if `SERR2LOM` is set |
+//! | TX FIFO | reports full and stops draining — both modes ignore `TXREQ` |
+//! | `CiTREC` | completely clean: `TEC` 0, `REC` 0, not bus-off, not error-passive |
+//!
+//! T_SPIMAXDLY is short. The erratum's worst case for a classic base frame is
+//! 5 nominal bit times — 10 us at 500 kbit/s, against roughly 1 us per SPI
+//! byte at 7.5 MHz.
+//!
+//! **Recovery** is [`MCP251xFd::recover_system_error`]: clear the flags and
+//! request Normal mode. The chip then retransmits the offending message
+//! itself, and the erratum states explicitly that resetting the device is not
+//! necessary. Clearing the interrupt flags alone never works — the flags are
+//! not what is wrong, the operation mode is.
+//!
+//! **Avoiding it** means keeping SPI byte gaps and the last-byte-to-nCS gap
+//! short. Anything that can stall mid-transaction is a risk: a shared bus
+//! whose arbitration can preempt, a DMA completion serviced on another core
+//! (see the previous section), or a debugger halt. Only [`MCP251xFd::receive`]
+//! issues RAM reads, so a transmit-only workload does not trigger this — one
+//! project saw zero faults in 86,901 sustained transmits and then roughly 5.4
+//! faults per second once the same load included the receive path.
+//!
 //! # Example (sync; the async API is identical plus `.await`)
 //!
 //! ```ignore

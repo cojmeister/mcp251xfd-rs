@@ -699,7 +699,9 @@ impl CiFifoSta {
         not_full_or_not_empty,
         with_not_full_or_not_empty,
         0,
-        "`TFNRFNIF` (TX: not full / RX: not empty)"
+        "`TFNRFNIF` (TX: not full / RX: not empty). For a TX FIFO this is a \
+         capacity flag, not a health flag: a stalled controller reports free \
+         space while draining nothing"
     );
     bit!(
         half_full,

@@ -68,6 +68,47 @@ line. See [Status](#status).
 
 RAM reads corrupt above `0.85 * SYSCLK / 2` — 17 MHz at the recommended 40 MHz SYSCLK. The driver cannot observe your bus clock; size it with `max_spi_hz`. `MCP251xFd::init` verifies communication with a RAM echo test and fails with `Error::CommunicationCheckFailed` on an over-clocked bus.
 
+## Blocking or async
+
+Both APIs are generated from one source, so they are feature-identical.
+
+Use **async** when the core issuing SPI also runs other work. Use **blocking**
+when the core is dedicated to CAN — and in particular on any target where DMA
+completion interrupts are serviced on a *different* core than the one that
+issued the transfer.
+
+The RP2040 under `embassy-rp` is that case: `DMA_IRQ_0` is enabled in
+whichever core calls `embassy_rp::init` (core 0), `DMA_IRQ_1` is never used,
+so core 1's SPI DMA completions are serviced on core 0 at an unpredictable
+phase. Blocking removes the interrupt entirely and frees two DMA channels, and
+for the 3–18 byte transfers this driver issues, DMA setup overhead dominates
+anyway. See the crate docs for the full explanation, and
+`examples/rp2040/src/bin/blocking_core1.rs` for a worked setup.
+
+## Known hardware anomalies
+
+### MCP2517FD: transmit stalls under a receive-heavy load
+
+On the **MCP2517FD only** (DS80000792D item 1 — the MCP2518FD/MCP251863
+errata have no equivalent), a long enough gap between SPI bytes, or between
+the last byte and nCS rising, during an SPI **READ that touches message RAM**
+causes a TX MAB underflow. The budget is tight: 5 nominal bit times, so 10 µs
+at 500 kbit/s.
+
+| Where | What you see |
+|---|---|
+| `CiINT` | `SERRIF` latched, usually with `MODIF` and `IVMIF` |
+| `CiCON.OPMOD` | Restricted Operation, or Listen Only if `SERR2LOM` is set |
+| TX FIFO | reports full and stops draining — both modes ignore `TXREQ` |
+| `CiTREC` | completely clean: `TEC` 0, `REC` 0, not bus-off, not error-passive |
+
+It looks nothing like a bus fault, and clearing the interrupt flags never
+fixes it — the operation mode is what changed. Recover with
+`recover_system_error`, which clears the flags and re-requests Normal mode;
+the chip then retransmits the offending message itself and no reset is needed.
+
+Only `receive` issues RAM reads, so transmit-only workloads do not trigger it.
+
 ## Feature flags
 
 | Flag | Effect |
