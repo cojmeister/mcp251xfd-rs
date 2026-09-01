@@ -48,6 +48,10 @@ not taken from the silkscreen:
 | `soak` | SPI wiring only | Sustained traffic at the production SPI clock, reporting corruption rate in ppm plus `TxFifoFull`, RX overflow, and TEC/REC. Runs until stopped. |
 | `chip2chip` | Transceivers + common CAN bus | Chip 0 → chip 1 over the real bus: classic at the nominal rate, then FD-48 with bit-rate switch. |
 | `multinode` | Transceivers + common CAN bus | Three nodes: broadcast delivery, per-node acceptance filters, and back-to-back delivery from two transmitters (20/20 frames over 10 rounds). |
+| `regdump` | SPI wiring only | Dumps every configuration register the driver writes for all ten chips, and diffs the bit-timing registers against the values `CAN_CONFIG` implies. **Not yet verified on hardware.** |
+| `stall` | Transceivers + common CAN bus | Reproduces the MCP2517FD TX MAB underflow stall (DS80000792D item 1) with a receive-then-echo load at 500 Hz on `Normal20`, reports the fault signature, and times four recovery ladders. **Not yet verified on hardware.** |
+| `blocking_core1` | Transceivers + common CAN bus | The blocking driver run on core 1 under the same `Normal20` load as `stall`, while core 0 measures its own scheduling jitter -- run the two back to back to see whether the cross-core DMA interrupt is what causes the stall. **Not yet verified on hardware.** |
+| `batch` | SPI wiring only | Times `transmit` in a loop against `transmit_batch` for ten chips, three frames each, at 500 Hz, and probes the partial-fill path against a two-deep FIFO. **Not yet verified on hardware.** |
 
 Each binary **repeats its sweep every 5 seconds** rather than reporting once,
 so output is still arriving whenever you open the serial port. Every pass
@@ -77,7 +81,7 @@ rustup target add thumbv6m-none-eabi
 cargo build --release
 ```
 
-Builds all ten binaries with zero warnings. The `.cargo/config.toml` sets the
+Builds all fourteen binaries with zero warnings. The `.cargo/config.toml` sets the
 target and the linker scripts (`link.x`, `link-rp.x`); `memory.x` is the
 standard RP2040 layout (2 MB flash, 256-byte boot2 region) and relies on
 embassy-rp's default `BOOT_LOADER_W25Q080` second stage — a board with a
@@ -105,6 +109,10 @@ cargo run --release --bin layouts      # expect: layouts: all 68 checks OK
 cargo run --release --bin soak         # expect: cycle N: ... ALL OK (runs until stopped)
 cargo run --release --bin chip2chip    # expect: classic A->B OK, FD-48 BRS A->B OK
 cargo run --release --bin multinode    # expect: broadcast/selective/back-to-back OK
+cargo run --release --bin regdump      # expect: per-chip register dump, no mismatch lines
+cargo run --release --bin stall        # expect: fault signature + ladder timings (not yet verified)
+cargo run --release --bin blocking_core1 # expect: core0/core1 jitter + stall counts (not yet verified)
+cargo run --release --bin batch        # expect: transmit vs transmit_batch timings within noise of each other
 ```
 
 The board reboots into the firmware and appears as a serial port (`COMn` on

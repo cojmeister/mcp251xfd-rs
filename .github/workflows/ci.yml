@@ -78,7 +78,7 @@ jobs:
       # examples/rp2040 declares its own [workspace], so the root job's
       # clippy/fmt cannot reach it. `--bins` rather than `--all-targets`:
       # the test targets need libtest, which thumbv6m-none-eabi has no
-      # prebuilt copy of. The four binaries are the whole crate.
+      # prebuilt copy of. The binaries are the whole crate.
       - run: cargo clippy --bins -- -D warnings
         working-directory: examples/rp2040
       - run: cargo fmt --check
