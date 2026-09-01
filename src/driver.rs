@@ -431,6 +431,42 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         self.transmit_raw(fifo, header, frame.data()).await
     }
 
+    /// Queues several classic frames on a transmit FIFO, returning how many
+    /// were accepted.
+    ///
+    /// Frames are queued in order and the first refusal ends the batch, so
+    /// the return value is the length of the accepted prefix — frames are
+    /// never reordered or skipped. A result below `frames.len()` means the
+    /// FIFO filled; the caller retries the remainder once a slot frees up.
+    /// Any error other than a full FIFO propagates and the count is lost, so
+    /// the frames already queued in that call have still been handed to the
+    /// chip.
+    ///
+    /// This costs exactly the same SPI transactions as calling
+    /// [`Self::transmit`] in a loop: the readiness check already shares a
+    /// transaction with the user-address read, so there is nothing further to
+    /// fold. What it adds is the accepted-count contract, which makes partial
+    /// success explicit instead of leaving the caller to match on
+    /// [`Error::TxFifoFull`] mid-loop and work out how far it got.
+    ///
+    /// At most 255 frames are queued; any beyond that are ignored, which no
+    /// FIFO can hold anyway (the deepest is 32 elements).
+    pub async fn transmit_batch(
+        &mut self,
+        fifo: Fifo,
+        frames: &[Frame],
+    ) -> Result<u8, Error<SPI::Error>> {
+        let mut accepted: u8 = 0;
+        for frame in frames.iter().take(u8::MAX as usize) {
+            match self.transmit(fifo, frame).await {
+                Ok(()) => accepted += 1,
+                Err(Error::TxFifoFull) => return Ok(accepted),
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(accepted)
+    }
+
     /// Queues a CAN FD frame. Same contract as [`Self::transmit`].
     ///
     /// `frame.flags().brs` works as expected (`CiCON.BRSDIS` stays clear).

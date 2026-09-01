@@ -783,3 +783,55 @@ fn reset_fifo_addresses_the_right_fifo() {
     can.reset_fifo(Fifo::F2).unwrap();
     spi.done();
 }
+
+#[test]
+fn transmit_batch_queues_every_frame_and_counts_them() {
+    let frame = Frame::new(StandardId::new(0x123).unwrap(), &[1, 2, 3, 4]).unwrap();
+    let body = [
+        0x23, 0x01, 0x00, 0x00, // T0: SID 0x123
+        0x04, 0x00, 0x00, 0x00, // T1: DLC 4, SEQ 0
+        0x01, 0x02, 0x03, 0x04,
+    ];
+    let mut e = Vec::new();
+    e.extend(r32_pair(0x060, 0x0000_0001, 0x0000_0000));
+    e.extend(wram(0x400, &body));
+    e.extend(w8(0x05D, 0x03));
+    e.extend(r32_pair(0x060, 0x0000_0001, 0x0000_0010));
+    let mut second = body;
+    second[5] = 0x02; // SEQ 1
+    e.extend(wram(0x410, &second));
+    e.extend(w8(0x05D, 0x03));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert_eq!(can.transmit_batch(Fifo::F1, &[frame, frame]).unwrap(), 2);
+    spi.done();
+}
+
+#[test]
+fn transmit_batch_reports_the_accepted_prefix_when_the_fifo_fills() {
+    let frame = Frame::new(StandardId::new(0x123).unwrap(), &[]).unwrap();
+    let body = [0x23, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+    let mut e = Vec::new();
+    e.extend(r32_pair(0x060, 0x0000_0001, 0x0000_0000));
+    e.extend(wram(0x400, &body));
+    e.extend(w8(0x05D, 0x03));
+    // Second attempt: FIFO now full, so the batch stops here.
+    e.extend(r32_pair(0x060, 0x0000_0000, 0x0000_0010));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert_eq!(
+        can.transmit_batch(Fifo::F1, &[frame, frame, frame])
+            .unwrap(),
+        1,
+        "only the first frame was accepted"
+    );
+    spi.done();
+}
+
+#[test]
+fn transmit_batch_of_nothing_is_a_no_op() {
+    let mut spi = Mock::new(&[]);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert_eq!(can.transmit_batch(Fifo::F1, &[]).unwrap(), 0);
+    spi.done();
+}
