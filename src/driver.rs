@@ -10,8 +10,8 @@ use crate::frame::{FdFrame, Frame, FrameFlags, ReceivedFrame, RxFrame};
 use crate::registers::objects::{RxHeader, TxHeader, dlc_to_len, len_to_dlc};
 use crate::registers::ram::{FifoDirection, FifoLayout};
 use crate::registers::{
-    CiCon, CiFifoCon, CiFifoSta, CiInt, CiTdc, CiTrec, CiVec, Fifo, Filter, OperationMode, Osc,
-    TdcMode, Variant, addr,
+    CiCon, CiDbtCfg, CiFifoCon, CiFifoSta, CiInt, CiNbtCfg, CiTdc, CiTrec, CiVec, Fifo, Filter,
+    OperationMode, Osc, TdcMode, Variant, addr,
 };
 use embedded_hal::delay::DelayNs;
 use embedded_hal::spi::SpiDevice;
@@ -99,6 +99,25 @@ impl Event {
             other => Self::Unknown(other),
         }
     }
+}
+
+/// A snapshot of the chip's configuration registers, for diffing what the
+/// driver asked for against what the chip actually holds.
+///
+/// Returned by [`MCP251xFd::read_back_config`]. Since [`MCP251xFd::init`]
+/// builds `CiCON` and the bit-timing registers from its own [`Config`],
+/// this is the only way to confirm the chip agrees with that intent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct ChipConfig {
+    /// `CiCON` — operation mode, ISO CRC, retransmission and TEF policy.
+    pub con: CiCon,
+    /// `CiNBTCFG` — nominal bit timing.
+    pub nominal: CiNbtCfg,
+    /// `CiDBTCFG` — data bit timing (meaningful only in CAN FD modes).
+    pub data: CiDbtCfg,
+    /// `CiTDC` — transmitter delay compensation.
+    pub tdc: CiTdc,
 }
 
 #[maybe_async_cfg::maybe(
@@ -614,6 +633,93 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         Ok(RxFrame {
             frame,
             timestamp: None,
+        })
+    }
+
+    /// Reads one 32-bit register straight off the chip.
+    ///
+    /// Diagnostic escape hatch. The driver does not interpret the result and
+    /// keeps no record of it. `address` is a 12-bit SPI address; the named
+    /// constants live in [`registers::addr`](crate::registers::addr).
+    ///
+    /// This is deliberately not behind a feature flag: a bench operator needs
+    /// it on the build that is already flashed.
+    pub async fn read_register_raw(&mut self, address: u16) -> Result<u32, Error<SPI::Error>> {
+        self.bus.read_sfr32(address).await
+    }
+
+    /// Writes one 32-bit register straight to the chip.
+    ///
+    /// Diagnostic escape hatch, and a sharp one.
+    ///
+    /// **Writing a configuration register through this can desynchronise the
+    /// driver from the chip.** The driver tracks the TX sequence counter and
+    /// the variant's sequence mask internally, and assumes it is the only
+    /// writer of `CiCON`, the FIFO control registers and the filter
+    /// registers. Changing those behind its back is not detected.
+    ///
+    /// Two addresses are actively unsafe to write this way:
+    ///
+    /// - `IOCON` (0xE04) must be written one byte at a time. A multi-byte
+    ///   write spanning bytes 2-3 clears `LAT0`/`LAT1`
+    ///   (DS80000792D item 6 / DS80000789F item 5). This method always writes
+    ///   four bytes.
+    /// - `CiFIFOCON` byte 1 carries the write-only `UINC`, `TXREQ` and
+    ///   `FRESET` strobes. Use [`Self::transmit`] and [`Self::reset_fifo`]
+    ///   instead of assembling them by hand.
+    pub async fn write_register_raw(
+        &mut self,
+        address: u16,
+        value: u32,
+    ) -> Result<(), Error<SPI::Error>> {
+        self.bus.write_sfr32(address, value).await
+    }
+
+    /// Reads `CiCON`, whose `OPMOD` field is the chip's current operation
+    /// mode.
+    ///
+    /// The driver keeps no record of the mode it last requested, and the chip
+    /// can leave a mode on its own — a system error drops it into Restricted
+    /// Operation or Listen Only (see [`Self::recover_system_error`]). This is
+    /// how to find out where it actually is.
+    pub async fn control_register(&mut self) -> Result<CiCon, Error<SPI::Error>> {
+        Ok(CiCon(self.bus.read_sfr32(addr::C1CON).await?))
+    }
+
+    /// Reads a FIFO's control register, i.e. the configuration
+    /// [`Self::apply_layout`] wrote plus the live `TXREQ` strobe.
+    ///
+    /// `TXREQ` is the useful bit at runtime: the chip sets it when frames are
+    /// queued and clears it once the FIFO drains, so it distinguishes "frames
+    /// are still pending" from "the FIFO is idle" — which
+    /// [`Self::fifo_status`]'s not-full flag does not.
+    pub async fn fifo_config(&mut self, fifo: Fifo) -> Result<CiFifoCon, Error<SPI::Error>> {
+        Ok(CiFifoCon(self.bus.read_sfr32(addr::fifo_con(fifo)).await?))
+    }
+
+    /// Reads a FIFO's user address (`CiFIFOUA`): the message RAM offset of
+    /// the next element the host should write or read.
+    ///
+    /// Not meaningful in Configuration mode (DS20006027B Register 3-31
+    /// Note 1).
+    pub async fn fifo_user_address(&mut self, fifo: Fifo) -> Result<u32, Error<SPI::Error>> {
+        self.bus.read_sfr32(addr::fifo_ua(fifo)).await
+    }
+
+    /// Reads back the configuration registers [`Self::init`] wrote, so the
+    /// [`Config`] that was asked for can be diffed against what the chip
+    /// holds.
+    ///
+    /// `C1CON`/`C1NBTCFG` and `C1DBTCFG`/`C1TDC` are adjacent pairs, so this
+    /// costs two SPI transactions, not four.
+    pub async fn read_back_config(&mut self) -> Result<ChipConfig, Error<SPI::Error>> {
+        let (con, nominal) = self.bus.read_sfr32_pair(addr::C1CON).await?;
+        let (data, tdc) = self.bus.read_sfr32_pair(addr::C1DBTCFG).await?;
+        Ok(ChipConfig {
+            con: CiCon(con),
+            nominal: CiNbtCfg(nominal),
+            data: CiDbtCfg(data),
+            tdc: CiTdc(tdc),
         })
     }
 

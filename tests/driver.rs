@@ -629,3 +629,78 @@ fn init_without_data_timing_disables_brs() {
     assert_eq!(can.init(&cfg, &mut NoopDelay).unwrap(), Variant::Mcp2517Fd);
     spi.done();
 }
+
+#[test]
+fn read_register_raw_reads_any_address() {
+    let mut e = Vec::new();
+    e.extend(r32(0x000, 0x0480_0020));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert_eq!(can.read_register_raw(0x000).unwrap(), 0x0480_0020);
+    spi.done();
+}
+
+#[test]
+fn write_register_raw_writes_any_address() {
+    let mut e = Vec::new();
+    e.extend(w32(0x1F0, 0xDEAD_BEEF));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    can.write_register_raw(0x1F0, 0xDEAD_BEEF).unwrap();
+    spi.done();
+}
+
+#[test]
+fn control_register_decodes_op_mode() {
+    let mut e = Vec::new();
+    // OPMOD = 7 (Restricted Operation) in bits 23:21.
+    e.extend(r32(0x000, 0x00E0_0000));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert_eq!(
+        can.control_register().unwrap().op_mode(),
+        OperationMode::RestrictedOperation
+    );
+    spi.done();
+}
+
+#[test]
+fn fifo_config_reads_back_txreq() {
+    let mut e = Vec::new();
+    // CiFIFOCON1 at 0x05C: TXEN | TXREQ still pending.
+    e.extend(r32(0x05C, (1 << 7) | (1 << 9)));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    let con = can.fifo_config(Fifo::F1).unwrap();
+    assert!(con.tx());
+    assert!(con.txreq(), "a TX FIFO with frames still queued");
+    spi.done();
+}
+
+#[test]
+fn fifo_user_address_reads_the_ua_register() {
+    let mut e = Vec::new();
+    e.extend(r32(0x064, 0x0000_0030));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert_eq!(can.fifo_user_address(Fifo::F1).unwrap(), 0x30);
+    spi.done();
+}
+
+#[test]
+fn read_back_config_fetches_all_four_timing_registers() {
+    // C1CON/C1NBTCFG and C1DBTCFG/C1TDC are two adjacent pairs, so this
+    // costs two transactions rather than four.
+    let mut e = Vec::new();
+    e.extend(r32_pair(0x000, 0x0480_0020, 0x003E_0F0F));
+    e.extend(r32_pair(0x008, 0x000E_0303, 0x0202_0F00));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    let cfg = can.read_back_config().unwrap();
+    assert_eq!(cfg.con.op_mode(), OperationMode::Configuration);
+    assert!(cfg.con.iso_crc_enabled());
+    assert_eq!(cfg.nominal.0, 0x003E_0F0F);
+    assert_eq!(cfg.data.0, 0x000E_0303);
+    assert_eq!(cfg.tdc.0, 0x0202_0F00);
+    spi.done();
+}
