@@ -36,6 +36,14 @@ not taken from the silkscreen:
 
 ## Binaries
 
+Hardware results for the runs marked **Verified** below are written up in
+[RESULTS.md](RESULTS.md).
+
+The five `bench_*` binaries assume **only the chip on GP15 (index 9) is wired to
+a CAN bus**, which is the bench they were written for; the other nine are held
+in Configuration mode and polled purely as SPI load. Adjust `BUSSED` if your
+board differs.
+
 | Binary | Needs | What it proves |
 |---|---|---|
 | `enumerate` | SPI wiring only | Every chip resets, initializes, and reports its variant — run this first on new hardware. |
@@ -48,10 +56,15 @@ not taken from the silkscreen:
 | `soak` | SPI wiring only | Sustained traffic at the production SPI clock, reporting corruption rate in ppm plus `TxFifoFull`, RX overflow, and TEC/REC. Runs until stopped. |
 | `chip2chip` | Transceivers + common CAN bus | Chip 0 → chip 1 over the real bus: classic at the nominal rate, then FD-48 with bit-rate switch. |
 | `multinode` | Transceivers + common CAN bus | Three nodes: broadcast delivery, per-node acceptance filters, and back-to-back delivery from two transmitters (20/20 frames over 10 rounds). |
-| `regdump` | SPI wiring only | Dumps every configuration register the driver writes for all ten chips, and diffs the bit-timing registers against the values `CAN_CONFIG` implies. **Not yet verified on hardware.** |
-| `stall` | Transceivers + common CAN bus | Reproduces the MCP2517FD TX MAB underflow stall (DS80000792D item 1) with a receive-then-echo load at 500 Hz on `Normal20`, reports the fault signature, and times four recovery ladders. **Not yet verified on hardware.** |
-| `blocking_core1` | Transceivers + common CAN bus | The blocking driver run on core 1 under the same `Normal20` load as `stall`, while core 0 measures its own scheduling jitter -- run the two back to back to see whether the cross-core DMA interrupt is what causes the stall. **Not yet verified on hardware.** |
-| `batch` | SPI wiring only | Times `transmit` in a loop against `transmit_batch` for ten chips, three frames each, at 500 Hz, and probes the partial-fill path against a two-deep FIFO. **Not yet verified on hardware.** |
+| `regdump` | SPI wiring only | Dumps every configuration register the driver writes for all ten chips, and diffs `NBTCFG` against the value `CAN_CONFIG` implies. **Verified: 450 chip dumps, zero errors** — see [RESULTS.md](RESULTS.md). |
+| `stall` | Transceivers + common CAN bus | Reproduces the MCP2517FD TX MAB underflow stall (DS80000792D item 1) with a receive-then-echo load at 500 Hz on `Normal20`, reports the fault signature, and times four recovery ladders. **Not yet run**; superseded for stall work by the `bench_*` binaries below, which control the delay rather than hoping for it. |
+| `blocking_core1` | Transceivers + common CAN bus | The blocking driver run on core 1 under the same `Normal20` load as `stall`, while core 0 measures its own scheduling jitter -- run the two back to back to see whether the cross-core DMA interrupt is what causes the stall. **Not yet run**; superseded by `bench_interference*`. |
+| `batch` | SPI wiring only | Times `transmit` in a loop against `transmit_batch` for ten chips, three frames each, and probes the partial-fill path against a two-deep FIFO. **Not yet verified on hardware.** |
+| `bench_async` | Transceivers + CAN bus on the GP15 chip | The async driver on core 1 — the configuration the field fault was reported under. **Verified: 76,000 cycles, 0 faults with core 0 idle**, which is what motivated `bench_interference`. |
+| `bench_blocking` | Transceivers + CAN bus on the GP15 chip | Identical workload, blocking driver. The control for `bench_async`. |
+| `bench_interference` | Transceivers + CAN bus on the GP15 chip | Core 0 masks its own interrupts for a swept duration, delaying `DMA_IRQ_0` and therefore nCS. **Verified: reproduces the stall, 294 faults, all recovered.** |
+| `bench_interference_blocking` | Transceivers + CAN bus on the GP15 chip | The same sweep with the blocking driver — no DMA, nothing to delay. **Verified: 0 faults under identical load.** This pair is the experiment. |
+| `bench_d10` | Transceivers + CAN bus on the GP15 chip | Two arms (fixed vs jittered gap), round-robin over `d`, re-testing an anomalous notch in the first sweep. **Verified: the notch was a single-pass artefact.** |
 
 Each binary **repeats its sweep every 5 seconds** rather than reporting once,
 so output is still arriving whenever you open the serial port. Every pass

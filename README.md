@@ -111,6 +111,14 @@ the chip then retransmits the offending message itself and no reset is needed.
 
 Only `receive` issues RAM reads, so transmit-only workloads do not trigger it.
 
+**This has been reproduced deliberately on hardware**, by delaying core 0's
+servicing of `DMA_IRQ_0` — see [`examples/rp2040/RESULTS.md`](examples/rp2040/RESULTS.md).
+The fault rate rises monotonically with the delay, with onset around 8–9 µs,
+which brackets the erratum's stated 10 µs. Running the **blocking** driver on
+the second core removed it entirely — 294 faults became 0 under identical load
+— so on a target where DMA completions are serviced on another core, the
+blocking driver is a fix for this fault and not merely a jitter improvement.
+
 ## Feature flags
 
 | Flag | Effect |
@@ -128,6 +136,13 @@ v0.1: reset/init, oscillator setup with variant detection, bit timing, FIFO layo
 
 Validated on hardware — a board carrying ten MCP2517FDs on one shared SPI bus — via the [hardware examples](#hardware-examples): init and variant detection on all ten chips, the measured on-wire bit rate, classic and FD-64 internal loopback, real-bus traffic between two and three nodes, 29-bit identifiers, masked acceptance filters, remote frames, multi-FIFO layouts, and a 43,000-frame soak with no corruption and no bus errors.
 
+Since then, on the same board against a PCAN-USB adapter (see [`examples/rp2040/RESULTS.md`](examples/rp2040/RESULTS.md) for the full run):
+
+- `read_back_config`, `control_register`, `fifo_config`, `fifo_user_address` and reads through `read_register_raw`, across all ten chips — the bit-timing read-back matches what `init` wrote, bit for bit
+- the folded status/user-address read in `transmit`/`receive`, over ~350,000 frames
+- `recover_system_error`, over **506 induced faults, 506 recovered**, median 137–246 µs
+- the MCP2517FD TX MAB underflow itself (DS80000792D item 1), reproduced deliberately and its signature confirmed exactly — including the `TEC=0 REC=0` that makes it look like anything but a bus fault
+
 **Implemented but never exercised on hardware** — mock coverage only, so treat as unproven:
 
 - `wait_rx` and the interrupt API (`configure_interrupts`, `clear_interrupts`, `interrupt_flags`, `pending_event`): the nINT line was never wired on the test board
@@ -137,8 +152,9 @@ Validated on hardware — a board carrying ten MCP2517FDs on one shared SPI bus 
 - Any oscillator configuration using the PLL, and any SYSCLK other than 20 MHz
 - Data-phase rates other than 2 Mbit/s
 - Gapped FIFO layouts (see `FifoLayout` for why they are not validated against the chip's address generation)
-- `read_register_raw`, `write_register_raw`, `control_register`, `fifo_config`, `fifo_user_address`, `read_back_config`, `reset_fifo`, and `recover_system_error`: the register-level surface added since v0.1, only mock-tested so far
-- `transmit_batch`, and the folded status/user-address read now shared by `transmit`/`receive`: the transaction-count savings are argued from the register map, not measured on a scope
+- `write_register_raw`: every hardware run so far only *reads* through the raw accessors
+- `reset_fifo`: exercised by no binary that has been run on hardware
+- `transmit_batch`: `batch` has not been run; the claim that it costs the same transactions as a `transmit` loop is still argued from the register map, not measured
 
 Two defects that hardware caught, for calibration on what mock tests can and cannot prove: a bit-timing preset paired with the wrong crystal (every rate silently halved), and an SPI clock above what the chip tolerates (intermittently corrupted register and message-RAM reads). Both were invisible to the mock suite *and* to internal loopback, because loopback shares the oscillator at both ends. The `bitrate` example exists specifically to close the first gap.
 

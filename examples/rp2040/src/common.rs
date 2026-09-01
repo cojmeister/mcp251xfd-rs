@@ -256,3 +256,57 @@ pub fn init_board_blocking() -> ([BlockingDevice; 10], UsbDriver, CORE1) {
 
     (devices, Driver::new(p.USB, Irqs), p.CORE1)
 }
+
+/// Async bus guarded by a critical-section mutex.
+///
+/// [`Bus`] uses [`NoopRawMutex`], which is deliberately not `Sync`, so devices
+/// built on it cannot be moved to the second core. The bench binaries that run
+/// the **async** driver on core 1 -- the configuration the field fault was
+/// reported under -- need `Send` devices, hence this parallel set.
+pub type AsyncCsBus = Mutex<CriticalSectionRawMutex, Spi<'static, SPI1, Async>>;
+
+/// The cross-core-capable counterpart of [`Device`].
+pub type AsyncCsDevice =
+    SpiDevice<'static, CriticalSectionRawMutex, Spi<'static, SPI1, Async>, Output<'static>>;
+
+static ASYNC_CS_SPI_BUS: StaticCell<AsyncCsBus> = StaticCell::new();
+
+/// Brings up the board with an **async** SPI1 whose devices are `Send`, and
+/// hands back `CORE1` so the caller can start the second core.
+///
+/// Identical pins, clock and SPI mode to [`init_board`]; the only differences
+/// are the mutex kind and the returned `CORE1`. Keeping DMA_CH0/DMA_CH1 wired
+/// up is the point: this is the configuration whose DMA completions are
+/// serviced on core 0 no matter which core issued the transfer.
+///
+/// Call this *or* [`init_board`] *or* [`init_board_blocking`], never more than
+/// one: each calls `embassy_rp::init`.
+#[allow(dead_code)]
+pub fn init_board_async_cs() -> ([AsyncCsDevice; 10], UsbDriver, CORE1) {
+    let p = embassy_rp::init(Default::default());
+
+    let mut cfg = SpiConfig::default();
+    cfg.frequency = mcp251xfd::max_spi_hz(CAN_CONFIG.clock.sysclk_hz());
+    cfg.phase = Phase::CaptureOnFirstTransition;
+    cfg.polarity = Polarity::IdleLow;
+
+    let spi = Spi::new(
+        p.SPI1, p.PIN_10, p.PIN_11, p.PIN_12, p.DMA_CH0, p.DMA_CH1, cfg,
+    );
+    let bus: &'static AsyncCsBus = ASYNC_CS_SPI_BUS.init(Mutex::new(spi));
+    let cs: [AnyPin; 10] = [
+        p.PIN_3.degrade(),
+        p.PIN_4.degrade(),
+        p.PIN_5.degrade(),
+        p.PIN_6.degrade(),
+        p.PIN_7.degrade(),
+        p.PIN_8.degrade(),
+        p.PIN_9.degrade(),
+        p.PIN_13.degrade(),
+        p.PIN_14.degrade(),
+        p.PIN_15.degrade(),
+    ];
+    let devices = cs.map(|pin| SpiDevice::new(bus, Output::new(pin, Level::High)));
+
+    (devices, Driver::new(p.USB, Irqs), p.CORE1)
+}
