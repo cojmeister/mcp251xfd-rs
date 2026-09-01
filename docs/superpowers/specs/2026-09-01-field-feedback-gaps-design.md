@@ -218,10 +218,13 @@ the first refusal rather than reordering.
 ### Hot-path change
 
 `transmit_raw` and `receive` currently issue `read_sfr32(fifo_sta)` followed
-by `read_sfr32(fifo_ua)`. These fold into a single 8-byte read at
-`fifo_sta`, giving **4 to 3 chip-select transactions per frame** for every
-existing caller with no API change. For the reporter's workload that is 120
-to 90 transactions per 2 ms cycle.
+by `read_sfr32(fifo_ua)`. These fold into a single 8-byte read at `fifo_sta`,
+giving **4 to 3 chip-select transactions per frame for `transmit`** (which
+writes the header/payload and strobes `UINC|TXREQ` after the folded read) and
+**5 to 4 for `receive`** (which additionally reads the message-object header
+and payload after the folded read), for every existing caller with no API
+change. For the reporter's transmit-dominated workload that is 120 to 90
+transactions per 2 ms cycle.
 
 This is unaffected by the `FIFOCI` corruption erratum (DS80000792D item 7 /
 DS80000789F item 6), because only bit 0 of `CiFIFOSTA` is consumed.

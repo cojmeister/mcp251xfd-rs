@@ -52,11 +52,18 @@
 //! running this driver on core 1 measured 23 late cycle starts per ten
 //! minutes on core 0 that a single-core build did not have.
 //!
-//! For a dedicated core the blocking driver is simply better: it removes the
-//! cross-core interrupt, frees two DMA channels, and for the 3-18 byte
-//! transfers this driver issues, DMA setup overhead dominates the transfer
-//! anyway. If the core has slack against its deadline, busy-waiting on the
-//! SPI FIFO costs it nothing it needs.
+//! For a dedicated core the blocking driver is simply better: it removes
+//! *this driver's own* cross-core interrupt — the SPI DMA completion — and
+//! frees two DMA channels, and for the 3-18 byte transfers this driver
+//! issues, DMA setup overhead dominates the transfer anyway. If the core has
+//! slack against its deadline, busy-waiting on the SPI FIFO costs it nothing
+//! it needs.
+//!
+//! That is not the same as isolating the core from cross-core interrupts
+//! generally. Other traffic can still land there — on the RP2040 under
+//! `embassy-rp`, a `Ticker`/`Timer` used to pace a task still wakes via
+//! `TIMER_IRQ_0`, which `embassy_rp::init` enables on whichever core called
+//! it (core 0), regardless of which core the timed task runs on.
 //!
 //! There is a correctness dimension too — see the next section.
 //!

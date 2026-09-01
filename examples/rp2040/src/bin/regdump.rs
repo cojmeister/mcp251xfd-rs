@@ -3,8 +3,9 @@
 //! The status registers were always readable (`fifo_status`,
 //! `interrupt_flags`, `error_counters`); the *configuration* registers were
 //! not, so there was no way to check whether a chip agreed with what `init`
-//! believed it had written. This dumps both, and diffs the bit-timing
-//! registers against the values `CAN_CONFIG` implies.
+//! believed it had written. This dumps both, and diffs `NBTCFG` (the nominal
+//! bit-timing register) against the value `CAN_CONFIG` implies -- `DBTCFG`
+//! is dumped alongside it but not diffed.
 //!
 //! Needs SPI wiring only -- nothing here touches the CAN bus.
 #![no_std]
@@ -57,6 +58,10 @@ async fn dump(index: usize, can: &mut Can) -> Result<(), common::CanError> {
     for fifo in [Fifo::F1, Fifo::F2] {
         let con = can.fifo_config(fifo).await?;
         let sta = can.fifo_status(fifo).await?;
+        // This chip is still in Configuration mode (nothing above requests
+        // another one), so per `fifo_user_address`'s own docs this value is
+        // not meaningful -- it's dumped anyway for a complete register
+        // picture, not because it's expected to mean anything here.
         let ua = can.fifo_user_address(fifo).await?;
         info!(
             "chip {index} {fifo:?}: CON={:#010X} tx={} txreq={} | STA={:#010X} ready={} empty_or_full={} | UA={:#06X}",

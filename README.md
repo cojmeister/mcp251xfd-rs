@@ -135,6 +135,8 @@ Validated on hardware — a board carrying ten MCP2517FDs on one shared SPI bus 
 - Any oscillator configuration using the PLL, and any SYSCLK other than 20 MHz
 - Data-phase rates other than 2 Mbit/s
 - Gapped FIFO layouts (see `FifoLayout` for why they are not validated against the chip's address generation)
+- `read_register_raw`, `write_register_raw`, `control_register`, `fifo_config`, `fifo_user_address`, `read_back_config`, `reset_fifo`, and `recover_system_error`: the register-level surface added since v0.1, only mock-tested so far
+- `transmit_batch`, and the folded status/user-address read now shared by `transmit`/`receive`: the transaction-count savings are argued from the register map, not measured on a scope
 
 Two defects that hardware caught, for calibration on what mock tests can and cannot prove: a bit-timing preset paired with the wrong crystal (every rate silently halved), and an SPI clock above what the chip tolerates (intermittently corrupted register and message-RAM reads). Both were invisible to the mock suite *and* to internal loopback, because loopback shares the oscillator at both ends. The `bitrate` example exists specifically to close the first gap.
 
@@ -142,7 +144,6 @@ Not yet implemented:
 
 - CRC-protected SPI transfers (the safe-write/CRC opcodes)
 - The Transmit Event FIFO (TEF) and the dedicated TX Queue (TXQ)
-- Helpers for Listen-Only / Restricted Operation beyond the generic `set_mode`
 - Sleep/wake conveniences beyond `set_mode` (fire-and-forget for Sleep — see its docs)
 - GPIO pin (`IOCON`) and CLKO divider control
 - Interrupt sources other than RX (TEF, error, wake-up, mode-change, etc.)
@@ -151,7 +152,7 @@ Not yet implemented:
 
 ## Hardware examples
 
-`examples/rp2040` is a standalone embassy crate with ten runnable RP2040 binaries, used as the driver's hardware acceptance tests. Eight need SPI wiring only — nothing touches the CAN pins: `enumerate` (every chip resets, initializes, and reports its variant), `bitrate` (measures the actual on-wire bit rate), `loopback` (layout, filters, classic + FD-64 TX/RX through internal loopback), `extended` (29-bit identifiers), `filters` (masked acceptance filtering), `remote` (RTR frames), `layouts` (multi-FIFO RAM budgeting and routing), and `soak` (sustained traffic with a corruption-rate report). `chip2chip` (classic, then FD-48 with bit-rate switch, between two chips) and `multinode` (broadcast delivery, per-node acceptance filters, back-to-back delivery across three nodes) additionally need transceivers and a terminated CAN bus.
+`examples/rp2040` is a standalone embassy crate with 14 runnable RP2040 binaries, used as the driver's hardware acceptance tests. Ten need SPI wiring only — nothing touches the CAN pins: `enumerate` (every chip resets, initializes, and reports its variant), `bitrate` (measures the actual on-wire bit rate), `loopback` (layout, filters, classic + FD-64 TX/RX through internal loopback), `extended` (29-bit identifiers), `filters` (masked acceptance filtering), `remote` (RTR frames), `layouts` (multi-FIFO RAM budgeting and routing), `soak` (sustained traffic with a corruption-rate report), `batch` (times `transmit` in a loop against `transmit_batch`), and `regdump` (dumps and diffs the configuration registers `init` should have written). `chip2chip` (classic, then FD-48 with bit-rate switch, between two chips), `multinode` (broadcast delivery, per-node acceptance filters, back-to-back delivery across three nodes), `stall` (reproduces the MCP2517FD transmit stall and times recovery ladders), and `blocking_core1` (the blocking driver on a dedicated core, compared against `stall`) additionally need transceivers and a terminated CAN bus — `stall` and `blocking_core1` because they run in a Normal mode rather than internal loopback.
 
 Logs leave over the RP2040's own USB port as CDC-ACM serial, so **no debug probe is needed** — any serial terminal reads them.
 

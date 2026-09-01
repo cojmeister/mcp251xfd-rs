@@ -44,6 +44,20 @@
 //! `Normal20` also matches the conditions the fault was reported under:
 //! classic CAN at 500 kbit/s, where T_SPIMAXDLY is at its tightest (5 nominal
 //! bit times, 10 us).
+//!
+//! # Offered load
+//!
+//! All ten chips transmitting one 8-byte classic frame every 2 ms cycle would
+//! be ~10 x 250 us = 2.5 ms of airtime on a single 500 kbit/s bus -- about
+//! 125% utilisation, which makes a permanently full TX FIFO the steady state
+//! instead of a symptom worth reporting (detection here reads `CiCON.OPMOD`,
+//! not FIFO fullness, so it still works either way, but a saturated bus
+//! muddies the comparison against `blocking_core1`). Only [`ACTIVE_PER_CYCLE`]
+//! chips transmit each cycle, rotating through all ten in fixed groups so
+//! every chip gets a turn every `10 / ACTIVE_PER_CYCLE` cycles -- at 2 and
+//! 2 ms that is every 5 cycles (10 ms), a 100 Hz effective per-chip send
+//! rate. Offered load per active cycle is then ~2 x 250 us = 500 us, 25% of
+//! the 2 ms budget.
 #![no_std]
 #![no_main]
 
@@ -51,7 +65,7 @@
 mod common;
 
 use embassy_executor::Spawner;
-use embassy_time::{Delay, Instant, Timer};
+use embassy_time::{Delay, Duration, Instant, Ticker};
 use embedded_can::{Frame as _, StandardId};
 use log::{error, info, warn};
 use mcp251xfd::{
@@ -69,6 +83,10 @@ const LAYOUT: FifoLayout =
 
 /// Classic CAN on the real bus. Must be a Normal mode — see the wiring note.
 const MODE: OperationMode = OperationMode::Normal20;
+
+/// How many of the ten chips transmit each cycle -- see "Offered load" above.
+/// Must divide 10 evenly so the rotation covers every chip on a fixed cadence.
+const ACTIVE_PER_CYCLE: usize = 2;
 
 /// Where recovery returns to. Figure 2-1 makes Restricted Operation and
 /// Listen Only exit directly to the Normal modes, so this needs no
@@ -144,6 +162,10 @@ async fn is_recovered(can: &mut Can) -> Result<bool, common::CanError> {
     if is_stalled(can.control_register().await?.op_mode()) {
         return Ok(false);
     }
+    // `not_full_or_not_empty` is a capacity flag, not a health flag (see the
+    // driver's `transmit` docs) -- it is safe to read as a recovery signal
+    // here only because `op_mode()` was already checked above, so this just
+    // confirms the FIFO isn't sitting full behind an otherwise-Normal mode.
     Ok(can.fifo_status(TX).await?.not_full_or_not_empty())
 }
 
@@ -193,12 +215,19 @@ async fn main(spawner: Spawner) {
     let mut cycles: u32 = 0;
     let mut faults: u32 = 0;
     let mut ladder_index = 0usize;
+    let groups = chips.len() / ACTIVE_PER_CYCLE;
+    let mut ticker = Ticker::every(Duration::from_micros(2000));
 
     loop {
         cycles += 1;
         // The receive-then-echo path: transmit, then read the frame back out
-        // of RAM. The read is the half that trips the erratum.
-        for can in chips.iter_mut() {
+        // of RAM. The read is the half that trips the erratum. Only a
+        // rotating subset transmits each cycle -- see "Offered load" above --
+        // but every chip's RX FIFO is still drained below, since any of them
+        // may have received from whichever chips were active this cycle.
+        let group = (cycles as usize - 1) % groups;
+        let start = group * ACTIVE_PER_CYCLE;
+        for can in chips[start..start + ACTIVE_PER_CYCLE].iter_mut() {
             let _ = can.transmit(TX, &frame).await;
         }
         for can in chips.iter_mut() {
@@ -254,8 +283,9 @@ async fn main(spawner: Spawner) {
         if cycles.is_multiple_of(500) {
             info!("{cycles} cycles, {faults} faults");
         }
-        // 500 Hz, matching the load that reproduced this in the field.
-        Timer::after_micros(2000).await;
+        // A fixed 2 ms cycle, matching `blocking_core1`'s `Ticker` so the two
+        // binaries run at the same effective rate and are comparable.
+        ticker.next().await;
     }
 }
 

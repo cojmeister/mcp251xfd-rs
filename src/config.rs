@@ -27,8 +27,16 @@ use embedded_can::Id;
 /// that is correct. On an RP2040 the same 8.5 MHz ceiling (a 20 MHz SYSCLK)
 /// becomes 7.5 MHz at a 120 MHz `clk_peri` and 7.8125 MHz at 125 MHz.
 ///
-/// The ceiling is real: on a ten-chip MCP2517FD board it was measured clean
-/// at every rate up to 12.5 MHz and corrupting at 15.625 MHz.
+/// The ceiling is real, but read the supporting measurement for what it is.
+/// The ten-chip MCP2517FD board that produced it runs a 20 MHz SYSCLK, whose
+/// own erratum ceiling (this function, at 20 MHz) is 8.5 MHz. On that board,
+/// corruption was *observed* at 15.625 MHz, and every rate tried up to and
+/// including 12.5 MHz — itself ~47% above the board's own 8.5 MHz ceiling —
+/// came back clean. That is not evidence 12.5 MHz is safe: absence of
+/// observed corruption on one board, at one temperature, on one silicon
+/// sample, below 15.625 MHz is not a licence to run above the erratum limit
+/// computed for your SYSCLK. Design to the number this function returns, not
+/// to the highest rate that happened not to fail.
 ///
 /// The driver cannot observe your actual SPI clock through `SpiDevice`, so
 /// sizing the bus is yours to do. Derive it from the same [`ClockConfig`] the

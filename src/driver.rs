@@ -644,11 +644,17 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         if !CiFifoSta(sta_raw).not_full_or_not_empty() {
             return Err(Error::RxFifoEmpty);
         }
-        // Validated raw and for 32-bit alignment before narrowing, as in
-        // `transmit_raw`. Every RX object starts with an 8-byte header, so a
-        // `UA` above `RAM_SIZE - 8` is implausible and would make the header
-        // read below run past the end of message RAM on its own.
-        if ua % 4 != 0 || ua as usize + 8 > addr::RAM_SIZE {
+        // Validate the *raw* read before narrowing, as in `transmit_raw`:
+        // `ua >= RAM_SIZE` is caught here rather than folded into the
+        // end-bound check below, so a `ua` near `u32::MAX` can't slip through
+        // via a wrapped `usize` addition on a 32-bit target.
+        if ua >= addr::RAM_SIZE as u32 || ua % 4 != 0 {
+            return Err(Error::CommunicationCheckFailed);
+        }
+        // Every RX object starts with an 8-byte header, so a `UA` above
+        // `RAM_SIZE - 8` is implausible and would make the header read below
+        // run past the end of message RAM on its own.
+        if ua as usize + 8 > addr::RAM_SIZE {
             return Err(Error::CommunicationCheckFailed);
         }
         let base = addr::RAM_START + ua as u16;
@@ -905,9 +911,17 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// record of the mode it last requested. Pass the Normal mode the
     /// application was running in. Per DS20005678E Figure 2-1 the transition
     /// out of Restricted Operation and Listen Only is a direct edge to the
-    /// Normal modes, so no Configuration-mode round trip is needed and the
-    /// cost is a few SPI transactions plus bus re-integration (11 consecutive
-    /// recessive bits).
+    /// Normal modes, so no Configuration-mode round trip is needed. The
+    /// typical case is cheap: a few SPI transactions plus bus re-integration
+    /// (11 consecutive recessive bits). The worst case is not — this calls
+    /// [`Self::set_mode`], whose bounded poll can take up to 80 iterations of
+    /// a register read plus a 100 us delay before giving up with
+    /// [`Error::ModeChangeTimeout`], roughly 8 ms and 81 register reads. That
+    /// is four times the 2 ms cycle budget this method exists to fit inside;
+    /// a caller on a hard real-time deadline (e.g.
+    /// `examples/rp2040/src/bin/blocking_core1.rs`, which calls this inside a
+    /// 500 Hz loop) should budget for the timeout path, not just the typical
+    /// one.
     ///
     /// Queued frames are preserved. Use [`Self::reset_fifo`] instead only
     /// when the queue contents should be discarded.

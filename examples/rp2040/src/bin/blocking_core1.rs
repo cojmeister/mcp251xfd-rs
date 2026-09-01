@@ -10,8 +10,12 @@
 //! phase relative to core 0's own real-time cycle.
 //!
 //! `Spi::new_blocking` takes no DMA channels and raises no completion
-//! interrupt, so core 0 is left alone and two DMA channels come back. For the
-//! 3-18 byte transfers this driver issues, DMA setup overhead dominates the
+//! interrupt, so *that* interrupt stays off core 0 and two DMA channels come
+//! back. Core 0 is not otherwise left alone: `embassy_time`'s `Ticker` below
+//! still wakes via `TIMER_IRQ_0`, which `embassy_rp::init` enables on
+//! whichever core called it (core 0) regardless of which core's task uses
+//! the timer, so other cross-core interrupt traffic remains. For the 3-18
+//! byte transfers this driver issues, DMA setup overhead dominates the
 //! transfer anyway.
 //!
 //! There may also be a correctness gain. DS80000792D item 1 is triggered by
@@ -32,6 +36,16 @@
 //! **Needs the CAN bus wired**, same as `stall` and for the same reason: it
 //! runs `Normal20` so its fault rate is directly comparable with `stall`'s.
 //! Run the two back to back and compare — that comparison is the experiment.
+//!
+//! # Offered load
+//!
+//! Same reasoning as `stall`: all ten chips transmitting one 8-byte classic
+//! frame every 2 ms cycle would be ~125% of the bus's airtime, making a full
+//! TX FIFO the steady state rather than a symptom. Only [`ACTIVE_PER_CYCLE`]
+//! chips transmit each cycle, rotating through all ten in fixed groups on the
+//! same schedule `stall` uses, for a 100 Hz effective per-chip send rate and
+//! ~25% offered load per active cycle -- kept identical between the two
+//! binaries so the fault-rate comparison is apples to apples.
 #![no_std]
 #![no_main]
 
@@ -72,6 +86,12 @@ const MODE: OperationMode = OperationMode::Normal20;
 
 /// Core 0's cycle period, and core 1's.
 const CYCLE_US: u64 = 2000;
+
+/// How many of the ten chips transmit each cycle -- see "Offered load"
+/// above. Must divide 10 evenly so the rotation covers every chip on a fixed
+/// cadence, and kept equal to `stall`'s constant of the same name so the two
+/// binaries are comparable.
+const ACTIVE_PER_CYCLE: usize = 2;
 
 static CORE1_CYCLES: AtomicU32 = AtomicU32::new(0);
 static CORE1_ERRORS: AtomicU32 = AtomicU32::new(0);
@@ -122,13 +142,21 @@ async fn can_task(devices: [common::BlockingDevice; 10]) {
 
     let frame = Frame::new(StandardId::new(0x100).unwrap(), &[0xAA; 8]).unwrap();
     let mut ticker = Ticker::every(embassy_time::Duration::from_micros(CYCLE_US));
+    let groups = chips.len() / ACTIVE_PER_CYCLE;
+    let mut cycle: usize = 0;
 
     loop {
-        for can in chips.iter_mut() {
+        // Only a rotating subset transmits each cycle -- see "Offered load"
+        // above -- but every chip's RX FIFO is still drained below, since any
+        // of them may have received from whichever chips were active.
+        let group = cycle % groups;
+        let start = group * ACTIVE_PER_CYCLE;
+        for can in chips[start..start + ACTIVE_PER_CYCLE].iter_mut() {
             if can.transmit(TX, &frame).is_err() {
                 CORE1_ERRORS.fetch_add(1, Ordering::Relaxed);
             }
         }
+        cycle += 1;
         for can in chips.iter_mut() {
             while can.receive(RX).is_ok() {}
         }

@@ -1,5 +1,7 @@
 //! Times `transmit` in a loop against `transmit_batch`, ten chips, three
-//! frames each, at the 500 Hz cycle rate that motivated the API.
+//! frames each, `CYCLES` times back to back with no pacing between
+//! iterations -- a throughput measurement, not a reproduction of the 500 Hz
+//! cycle that motivated the API.
 //!
 //! Both should come out the same: after the paired status/user-address read,
 //! the readiness check shares a transaction with the user-address fetch, so
