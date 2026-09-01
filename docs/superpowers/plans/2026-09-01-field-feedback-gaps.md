@@ -17,7 +17,8 @@
 - **`#![deny(missing_docs)]` is set in `src/lib.rs`.** Every new public item — including every public struct field and enum variant — needs a doc comment, or the build fails.
 - **Parity is automatic; do not hand-write async variants.** Any method added inside the `#[maybe_async_cfg::maybe(...)]` impl block gets both a sync and an async form. Never add a method to only one.
 - **Every register address and bit position must match the spec's verified table.** Do not invent bit positions. The spec §2 lists each one with its source document.
-- **Verification commands** (these are what CI runs — `--all-features` does *not* link for tests because `defmt` needs a global logger):
+- **Intra-doc links may forward-reference across Tasks 4-6 only.** Those three tasks add methods that reference each other in their docs (`write_register_raw` cites `reset_fifo`; `reset_fifo` cites `fifo_config` and `recover_system_error`), so there is no ordering in which every link resolves at every intermediate commit. Tasks 4, 5 and 6 therefore run plain `cargo doc` and may leave broken-link warnings behind. From Task 8 onward, and in the final sweep, docs must be built the way CI does — `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps` — and must pass with zero warnings. Do not delete a forward reference to silence a warning in Tasks 4-6.
+- **Verification commands** (these are what CI runs — `--all-features` does *not* link for tests because `defmt` needs a global logger; `cargo doc` does not link, so `--all-features` is fine there):
   - `cargo test` and `cargo test --features async`
   - `cargo clippy --features async --all-targets -- -D warnings`
   - `cargo fmt --check`
@@ -730,7 +731,7 @@ Expected: PASS.
 - [ ] **Step 5: Full verification**
 
 Run: `cargo test && cargo test --features async && cargo clippy --features async --all-targets -- -D warnings && cargo fmt --check && cargo doc --features async --no-deps`
-Expected: all pass, 83 tests. `cargo doc` must emit no `missing_docs` errors for the new `ChipConfig` fields.
+Expected: tests and lints all pass, 83 tests. `cargo doc` must emit no `missing_docs` errors for the new `ChipConfig` fields. It **will** warn about unresolved links to `Self::reset_fifo` and `Self::recover_system_error`, which Tasks 5 and 6 add — that is expected here and is covered by the forward-reference rule in Global Constraints. Do not delete those links.
 
 - [ ] **Step 6: Commit**
 
@@ -881,9 +882,11 @@ fn recover_system_error_restores_normal_mode_from_restricted() {
     // half only: byte 0 = !0x08 = 0xF7, byte 1 = !0x90 = 0x6F.
     e.extend(w8(0x01C, 0xF7));
     e.extend(w8(0x01D, 0x6F));
-    // set_mode: read-modify-write REQOP, then poll OPMOD.
+    // set_mode: read-modify-write REQOP, then poll OPMOD. `with_req_op_mode`
+    // only touches bits 26:24, so the OPMOD bits 23:21 that were just read
+    // (7 << 21 = 0x00E0_0000) are written straight back.
     e.extend(r32(0x000, 0x00E0_0020));
-    e.extend(w32(0x000, 0x0600_0020)); // REQOP = 6 (Normal20)
+    e.extend(w32(0x000, 0x06E0_0020)); // REQOP := 6 (Normal20), OPMOD preserved
     e.extend(r32(0x000, 0x06C0_0020)); // OPMOD = 6, reached
     let mut spi = Mock::new(&e);
     let mut can = MCP251xFd::new(&mut spi);
@@ -916,7 +919,7 @@ fn recover_system_error_also_handles_the_listen_only_fallback() {
     e.extend(w8(0x01C, 0xF7));
     e.extend(w8(0x01D, 0x6F));
     e.extend(r32(0x000, 0x0060_0020));
-    e.extend(w32(0x000, 0x0600_0020));
+    e.extend(w32(0x000, 0x0660_0020)); // REQOP := 6, OPMOD (3 << 21) preserved
     e.extend(r32(0x000, 0x06C0_0020));
     let mut spi = Mock::new(&e);
     let mut can = MCP251xFd::new(&mut spi);
@@ -1455,7 +1458,7 @@ The adjacent comment already says internal design artefacts are not part of the 
 
 - [ ] **Step 7: Verify**
 
-Run: `cargo test && cargo test --features async && cargo doc --features async --no-deps && cargo clippy --features async --all-targets -- -D warnings && cargo fmt --check`
+Run: `cargo test && cargo test --features async && RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps && cargo clippy --features async --all-targets -- -D warnings && cargo fmt --check`
 Expected: all pass. `cargo doc` must report no broken intra-doc links — every `[`Self::...`]` used above refers to a method added in Tasks 4-7.
 
 Also run `cargo package --list --allow-dirty | grep -c docs/` and expect `0`.
@@ -1628,7 +1631,7 @@ async fn dump(index: usize, can: &mut Can) -> Result<(), common::CanError> {
     // What init should have written, derived from the same config the driver
     // was handed -- so a mismatch means the chip disagrees, not that these
     // literals drifted.
-    let want_nbt = common::CAN_CONFIG.nominal.to_register().0;
+    let want_nbt = common::CAN_CONFIG.nominal.to_reg().0;
     if cfg.nominal.0 != want_nbt {
         error!(
             "chip {index}: NBTCFG mismatch: chip has {:#010X}, config implies {:#010X}",
@@ -1679,7 +1682,7 @@ async fn main(spawner: Spawner) {
 }
 ```
 
-**Check before running:** the `to_register()` call assumes `NominalBitTiming` exposes such a method. Confirm with `grep -n "fn to_register\|fn register\|CiNbtCfg::new" src/config.rs`. If the conversion has a different name, use it; if the type offers no public conversion, drop the mismatch check and the `want_nbt` binding rather than adding a method to the library in this task.
+`NominalBitTiming::to_reg()` is verified to exist at `src/config.rs:203` and returns `CiNbtCfg`; use it exactly as written.
 
 - [ ] **Step 4: Build**
 
@@ -1998,7 +2001,7 @@ async fn setup(can: &mut Can) -> Result<(), common::CanError> {
 }
 ```
 
-**Check before building:** `CiTrec`'s bus-state accessors are used above as `tx_bus_off()` and `tx_error_passive()`. Confirm the real names with `grep -n "impl CiTrec" -A 25 src/registers/mod.rs` and use whatever is actually there.
+`CiTrec::tx_bus_off()` and `CiTrec::tx_error_passive()` are verified to exist at `src/registers/mod.rs:514-515`; use them exactly as written.
 
 - [ ] **Step 2: Build**
 
@@ -2454,7 +2457,7 @@ cargo test
 cargo test --features async
 cargo clippy --features async --all-targets -- -D warnings
 cargo fmt --check
-cargo doc --features async --no-deps
+RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps
 cargo build --target thumbv6m-none-eabi --no-default-features
 cargo build --target thumbv6m-none-eabi --all-features
 cargo package --list --allow-dirty | grep -c 'docs/'   # expect 0
