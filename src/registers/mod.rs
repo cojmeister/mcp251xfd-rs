@@ -410,6 +410,12 @@ impl CiCon {
         "`PXEDIS`"
     );
     bit!(
+        busy,
+        with_busy,
+        11,
+        "`BUSY` (module is transmitting or receiving)"
+    );
+    bit!(
         brs_disabled,
         with_brs_disabled,
         12,
@@ -420,6 +426,13 @@ impl CiCon {
         with_restrict_retx,
         16,
         "`RTXAT` (honor per-FIFO retransmission attempts)"
+    );
+    bit!(
+        serr2lom,
+        with_serr2lom,
+        18,
+        "`SERR2LOM` (on a system error, fall back to Listen Only instead of \
+         Restricted Operation)"
     );
     bit!(
         store_tef,
@@ -625,6 +638,9 @@ impl CiFifoCon {
     /// Value for byte 1 setting `UINC | TXREQ` — used to queue and flush a
     /// TX FIFO element.
     pub const CON_BYTE1_UINC_TXREQ: u8 = 0x03;
+    /// Value for byte 1 setting `FRESET` only — resets one FIFO's pointers
+    /// and status without touching its configuration bits.
+    pub const CON_BYTE1_FRESET: u8 = 0x04;
 
     bit!(
         not_full_empty_ie,
@@ -686,6 +702,18 @@ impl CiFifoSta {
         "`TFNRFNIF` (TX: not full / RX: not empty)"
     );
     bit!(
+        half_full,
+        with_half_full,
+        1,
+        "`TFHRFHIF` (TX: FIFO half or less full / RX: FIFO half or more full)"
+    );
+    bit!(
+        tx_empty_or_rx_full,
+        with_tx_empty_or_rx_full,
+        2,
+        "`TFERFFIF` (TX: FIFO empty / RX: FIFO full)"
+    );
+    bit!(
         rx_overflow,
         with_rx_overflow,
         3,
@@ -696,6 +724,24 @@ impl CiFifoSta {
         with_tx_attempts_exhausted,
         4,
         "`TXATIF`"
+    );
+    bit!(
+        tx_err,
+        with_tx_err,
+        5,
+        "`TXERR` (a bus error occurred while transmitting)"
+    );
+    bit!(
+        tx_lost_arbitration,
+        with_tx_lost_arbitration,
+        6,
+        "`TXLARB` (arbitration was lost while transmitting)"
+    );
+    bit!(
+        tx_aborted,
+        with_tx_aborted,
+        7,
+        "`TXABT` (the transmission was aborted)"
     );
 
     /// `FIFOCI` (bits 12:8): current FIFO message index. Subject to the
@@ -823,5 +869,60 @@ mod tests {
         assert!(CiFifoSta(1).not_full_or_not_empty());
         assert!(CiFifoSta(1 << 3).rx_overflow());
         assert_eq!(CiFifoSta(0x0500).fifo_index(), 5);
+    }
+
+    #[test]
+    fn new_con_bits_match_datasheet() {
+        // DS20006027B Register 3-1 / Linux mcp251xfd.h.
+        assert!(CiCon(1 << 11).busy());
+        assert!(CiCon(1 << 18).serr2lom());
+        assert_eq!(CiCon(0).with_busy(true).0, 1 << 11);
+        assert_eq!(CiCon(0).with_serr2lom(true).0, 1 << 18);
+        // Must not disturb the mode fields the driver already relies on.
+        let c = CiCon(0)
+            .with_req_op_mode(OperationMode::Normal20)
+            .with_serr2lom(true);
+        assert_eq!(c.0 >> 24 & 0b111, OperationMode::Normal20.bits() as u32);
+    }
+
+    #[test]
+    fn new_fifo_status_bits_match_datasheet() {
+        // DS20006027B Register 3-23.
+        assert!(CiFifoSta(1 << 1).half_full());
+        assert!(CiFifoSta(1 << 2).tx_empty_or_rx_full());
+        assert!(CiFifoSta(1 << 5).tx_err());
+        assert!(CiFifoSta(1 << 6).tx_lost_arbitration());
+        assert!(CiFifoSta(1 << 7).tx_aborted());
+    }
+
+    /// Decodes the two `CiFIFOSTA` values captured on the reporter's board
+    /// either side of the transmit stall (see the design doc, section 1).
+    #[test]
+    fn reported_stall_fifo_status_values_decode() {
+        let healthy = CiFifoSta(0x0000_0A03);
+        assert!(healthy.not_full_or_not_empty(), "TX FIFO had room");
+        assert!(healthy.half_full());
+        assert_eq!(healthy.fifo_index(), 10);
+
+        let faulted = CiFifoSta(0x0000_0800);
+        assert!(!faulted.not_full_or_not_empty(), "TX FIFO was full");
+        assert!(!faulted.half_full());
+        assert!(!faulted.tx_empty_or_rx_full());
+        assert_eq!(faulted.fifo_index(), 8);
+        // The stall is not a bus-error condition: none of the TX error bits
+        // are set, matching the clean CiTREC that was reported alongside it.
+        assert!(!faulted.tx_err());
+        assert!(!faulted.tx_lost_arbitration());
+        assert!(!faulted.tx_aborted());
+    }
+
+    #[test]
+    fn freset_byte1_mask_matches_bit_10() {
+        // FRESET is CiFIFOCON bit 10, i.e. bit 2 of byte 1.
+        assert_eq!(CiFifoCon::CON_BYTE1_FRESET, 1 << (10 - 8));
+        assert_eq!(
+            CiFifoCon(0).with_freset(true).0 >> 8,
+            CiFifoCon::CON_BYTE1_FRESET as u32
+        );
     }
 }
