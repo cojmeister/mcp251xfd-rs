@@ -90,6 +90,39 @@ impl<SPI: SpiDevice> Bus<SPI> {
         Ok(u32::from_le_bytes(buf))
     }
 
+    /// Reads two consecutive 32-bit registers in a single transaction.
+    ///
+    /// Per DS20006027B section 4.1 the SFR address auto-increments after
+    /// every data byte, so one 8-byte READ at `addr` returns the register at
+    /// `addr` followed by the one at `addr + 4`. Both must lie inside the SFR
+    /// space with no 0xFFF rollover between them — the rollover itself is
+    /// broken silicon (DS80000792D item 4 / DS80000789F item 3), so the
+    /// caller must not straddle it.
+    ///
+    /// Halves the chip-select count wherever the driver needs a status
+    /// register and the user address that follows it.
+    #[allow(dead_code)] // TODO: remove when Task 3 lands and uses this.
+    pub(crate) async fn read_sfr32_pair(
+        &mut self,
+        addr: u16,
+    ) -> Result<(u32, u32), Error<SPI::Error>> {
+        debug_assert!(addr % 4 == 0, "SFR pair reads must be 32-bit aligned");
+        debug_assert!(
+            addr < 0xFF8,
+            "SFR pair read would straddle the address rollover"
+        );
+        let c = cmd(Opcode::Read, addr);
+        let mut buf = [0u8; 8];
+        self.spi
+            .transaction(&mut [Operation::Write(&c), Operation::Read(&mut buf)])
+            .await
+            .map_err(Error::Spi)?;
+        Ok((
+            u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]),
+            u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]),
+        ))
+    }
+
     /// Writes a 32-bit register (little-endian on the wire).
     pub(crate) async fn write_sfr32(
         &mut self,
@@ -200,6 +233,28 @@ mod tests {
         assert_eq!(u32::from_le_bytes(buf), 0xAA55_AA55);
         spi.done();
     }
+
+    #[test]
+    fn read_sfr32_pair_returns_both_registers_in_one_transaction() {
+        // One command word, then eight data bytes: the SFR address
+        // auto-increments after every byte (DS20006027B section 4.1), so this
+        // returns CiFIFOSTA1 (0x060) followed by CiFIFOUA1 (0x064).
+        let mut spi = Mock::new(&[
+            Transaction::transaction_start(),
+            Transaction::write_vec(vec![0x30, 0x60]),
+            Transaction::read_vec(vec![
+                0x03, 0x0A, 0x00, 0x00, // 0x060 -> 0x00000A03
+                0x10, 0x00, 0x00, 0x00, // 0x064 -> 0x00000010
+            ]),
+            Transaction::transaction_end(),
+        ]);
+        let mut bus = Bus { spi: &mut spi };
+        assert_eq!(
+            bus.read_sfr32_pair(0x060).unwrap(),
+            (0x0000_0A03, 0x0000_0010)
+        );
+        spi.done();
+    }
 }
 
 #[cfg(all(test, feature = "async"))]
@@ -217,6 +272,22 @@ mod async_tests {
         ]);
         let mut bus = BusAsync { spi: &mut spi };
         assert_eq!(bus.read_sfr32(0x000).await.unwrap(), 0x0000_0460);
+        spi.done();
+    }
+
+    #[tokio::test]
+    async fn async_read_sfr32_pair() {
+        let mut spi = Mock::new(&[
+            Transaction::transaction_start(),
+            Transaction::write_vec(vec![0x30, 0x60]),
+            Transaction::read_vec(vec![0x01, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00]),
+            Transaction::transaction_end(),
+        ]);
+        let mut bus = BusAsync { spi: &mut spi };
+        assert_eq!(
+            bus.read_sfr32_pair(0x060).await.unwrap(),
+            (0x0000_0001, 0x0000_0020)
+        );
         spi.done();
     }
 }
