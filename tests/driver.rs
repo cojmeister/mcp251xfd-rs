@@ -704,3 +704,25 @@ fn read_back_config_fetches_all_four_timing_registers() {
     assert_eq!(cfg.tdc.0, 0x0202_0F00);
     spi.done();
 }
+
+#[test]
+fn reset_fifo_writes_only_the_freset_strobe() {
+    let mut e = Vec::new();
+    // CiFIFOCON1 byte 1 (0x05D) = FRESET, leaving UINC and TXREQ clear and
+    // every configuration byte untouched.
+    e.extend(w8(0x05D, 0x04));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    can.reset_fifo(Fifo::F1).unwrap();
+    spi.done();
+}
+
+#[test]
+fn reset_fifo_addresses_the_right_fifo() {
+    let mut e = Vec::new();
+    e.extend(w8(0x069, 0x04)); // CiFIFOCON2 byte 1
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    can.reset_fifo(Fifo::F2).unwrap();
+    spi.done();
+}

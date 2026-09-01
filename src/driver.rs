@@ -733,6 +733,29 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         self.bus.write_sfr8(addr::fifo_sta(fifo), 0x00).await
     }
 
+    /// Resets one FIFO by asserting `FRESET`: its head and tail pointers and
+    /// its `CiFIFOSTA` register are cleared, discarding whatever was queued.
+    ///
+    /// Per DS20005678E section 4.14 the `CiFIFOCONm` configuration bits are
+    /// left unchanged and the strobe self-clears when the reset completes, so
+    /// this is a single SPI transaction and does **not** require
+    /// Configuration mode. That makes it the cheap way to clear one wedged
+    /// FIFO — [`Self::apply_layout`] also asserts `FRESET`, but only as a
+    /// side effect of rewriting every FIFO's configuration, and it requires
+    /// Configuration mode.
+    ///
+    /// The same section requires that no transmissions are pending when a TX
+    /// FIFO is reset this way. Frames already handed to the chip are lost:
+    /// check [`Self::fifo_config`]'s `txreq` first if that matters, or abort
+    /// them deliberately. After a system error the chip has stopped
+    /// transmitting anyway — see [`Self::recover_system_error`], which is the
+    /// right tool for that case and does not discard queued frames.
+    pub async fn reset_fifo(&mut self, fifo: Fifo) -> Result<(), Error<SPI::Error>> {
+        self.bus
+            .write_sfr8(addr::fifo_con(fifo) + 1, CiFifoCon::CON_BYTE1_FRESET)
+            .await
+    }
+
     /// Reads the global interrupt flags (and enable bits).
     pub async fn interrupt_flags(&mut self) -> Result<CiInt, Error<SPI::Error>> {
         Ok(CiInt(self.bus.read_sfr32(addr::C1INT).await?))
