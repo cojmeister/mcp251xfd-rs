@@ -1,13 +1,16 @@
 //! Shared board setup for the 10-chip MCP2517FD test board.
 
+use core::cell::RefCell;
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
+use embassy_embedded_hal::shared_bus::blocking::spi::SpiDevice as BlockingSpiDevice;
 use embassy_embedded_hal::shared_bus::SpiDeviceError;
 use embassy_rp::bind_interrupts;
 use embassy_rp::gpio::{AnyPin, Level, Output, Pin};
-use embassy_rp::peripherals::{SPI1, USB};
-use embassy_rp::spi::{Async, Config as SpiConfig, Phase, Polarity, Spi};
+use embassy_rp::peripherals::{CORE1, SPI1, USB};
+use embassy_rp::spi::{Async, Blocking, Config as SpiConfig, Phase, Polarity, Spi};
 use embassy_rp::usb::{Driver, InterruptHandler};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
+use embassy_sync::blocking_mutex::Mutex as BlockingMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Delay, Timer};
 use mcp251xfd::{
@@ -191,4 +194,65 @@ pub async fn arm_filter(
     can.set_mode(OperationMode::InternalLoopback, &mut Delay)
         .await?;
     Ok(())
+}
+
+/// The blocking counterpart of [`Bus`].
+///
+/// Guarded by a critical-section mutex rather than [`NoopRawMutex`] because
+/// `blocking_core1` moves the devices to the second core, which requires
+/// them to be `Send`.
+pub type BlockingBus =
+    BlockingMutex<CriticalSectionRawMutex, RefCell<Spi<'static, SPI1, Blocking>>>;
+
+/// The blocking counterpart of [`Device`].
+pub type BlockingDevice = BlockingSpiDevice<
+    'static,
+    CriticalSectionRawMutex,
+    Spi<'static, SPI1, Blocking>,
+    Output<'static>,
+>;
+
+/// The concrete error type a driver call on a [`BlockingDevice`] returns.
+#[allow(dead_code)]
+pub type BlockingCanError =
+    mcp251xfd::Error<SpiDeviceError<embassy_rp::spi::Error, core::convert::Infallible>>;
+
+static BLOCKING_SPI_BUS: StaticCell<BlockingBus> = StaticCell::new();
+
+/// Brings up the board with a **blocking** SPI1, same pins and same clock as
+/// [`init_board`], and hands back `CORE1` so the caller can start the second
+/// core.
+///
+/// `Spi::new_blocking` takes no DMA channels, so this also frees DMA_CH0 and
+/// DMA_CH1 and raises no DMA completion interrupt at all -- which is the whole
+/// point on a dedicated core. See the driver's "Choosing blocking or async"
+/// docs.
+///
+/// Call this *or* [`init_board`], never both: each calls `embassy_rp::init`.
+#[allow(dead_code)]
+pub fn init_board_blocking() -> ([BlockingDevice; 10], UsbDriver, CORE1) {
+    let p = embassy_rp::init(Default::default());
+
+    let mut cfg = SpiConfig::default();
+    cfg.frequency = mcp251xfd::max_spi_hz(CAN_CONFIG.clock.sysclk_hz());
+    cfg.phase = Phase::CaptureOnFirstTransition;
+    cfg.polarity = Polarity::IdleLow;
+
+    let spi = Spi::new_blocking(p.SPI1, p.PIN_10, p.PIN_11, p.PIN_12, cfg);
+    let bus: &'static BlockingBus = BLOCKING_SPI_BUS.init(BlockingMutex::new(RefCell::new(spi)));
+    let cs: [AnyPin; 10] = [
+        p.PIN_3.degrade(),
+        p.PIN_4.degrade(),
+        p.PIN_5.degrade(),
+        p.PIN_6.degrade(),
+        p.PIN_7.degrade(),
+        p.PIN_8.degrade(),
+        p.PIN_9.degrade(),
+        p.PIN_13.degrade(),
+        p.PIN_14.degrade(),
+        p.PIN_15.degrade(),
+    ];
+    let devices = cs.map(|pin| BlockingSpiDevice::new(bus, Output::new(pin, Level::High)));
+
+    (devices, Driver::new(p.USB, Irqs), p.CORE1)
 }
