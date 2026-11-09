@@ -79,7 +79,9 @@ pub enum LayoutError {
 /// silicon does with the gaps.
 ///
 /// This is a fit-checking concern only, never a corruption one: the driver
-/// computes no element addresses of its own, it reads `CiFIFOUAm` back from
+/// computes no element addresses of its own (the one exception being
+/// `transmit_batch_contiguous`, which steps from `CiFIFOUAm` by the element
+/// stride and documents its own wrap rule), it reads `CiFIFOUAm` back from
 /// the chip for every access, so a disagreement surfaces as
 /// [`Error::CommunicationCheckFailed`](crate::Error::CommunicationCheckFailed)
 /// rather than as a write into the wrong FIFO.

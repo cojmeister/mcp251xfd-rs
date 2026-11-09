@@ -122,6 +122,36 @@ impl<SPI: SpiDevice> Bus<SPI> {
         ))
     }
 
+    /// Reads three consecutive 32-bit registers in one transaction.
+    ///
+    /// Same auto-increment mechanism and rollover rule as
+    /// [`Self::read_sfr32_pair`]. Exists for a TX FIFO's `CiFIFOCONm`,
+    /// `CiFIFOSTAm` and `CiFIFOUAm`, which are adjacent: one 12-byte READ
+    /// returns the element size and depth along with the readiness and
+    /// user-address words, for one extra four bytes on the wire instead of
+    /// another chip-select assertion.
+    pub(crate) async fn read_sfr32_triple(
+        &mut self,
+        addr: u16,
+    ) -> Result<[u32; 3], Error<SPI::Error>> {
+        debug_assert!(addr % 4 == 0, "SFR triple reads must be 32-bit aligned");
+        debug_assert!(
+            addr < 0xFF4,
+            "SFR triple read would straddle the address rollover"
+        );
+        let c = cmd(Opcode::Read, addr);
+        let mut buf = [0u8; 12];
+        self.spi
+            .transaction(&mut [Operation::Write(&c), Operation::Read(&mut buf)])
+            .await
+            .map_err(Error::Spi)?;
+        Ok([
+            u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]),
+            u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]),
+            u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]),
+        ])
+    }
+
     /// Writes a 32-bit register (little-endian on the wire).
     pub(crate) async fn write_sfr32(
         &mut self,
@@ -230,6 +260,27 @@ mod tests {
         let mut buf = [0u8; 4];
         bus.read_ram(0xBFC, &mut buf).unwrap();
         assert_eq!(u32::from_le_bytes(buf), 0xAA55_AA55);
+        spi.done();
+    }
+
+    #[test]
+    fn read_sfr32_triple_returns_three_registers_in_one_transaction() {
+        // CiFIFOCON1 (0x05C), CiFIFOSTA1 (0x060), CiFIFOUA1 (0x064).
+        let mut spi = Mock::new(&[
+            Transaction::transaction_start(),
+            Transaction::write_vec(vec![0x30, 0x5C]),
+            Transaction::read_vec(vec![
+                0x80, 0x00, 0x00, 0x02, // 0x05C -> 0x02000080
+                0x05, 0x00, 0x00, 0x00, // 0x060 -> 0x00000005
+                0x20, 0x00, 0x00, 0x00, // 0x064 -> 0x00000020
+            ]),
+            Transaction::transaction_end(),
+        ]);
+        let mut bus = Bus { spi: &mut spi };
+        assert_eq!(
+            bus.read_sfr32_triple(0x05C).unwrap(),
+            [0x0200_0080, 0x5, 0x20]
+        );
         spi.done();
     }
 

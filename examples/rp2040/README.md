@@ -60,6 +60,7 @@ board differs.
 | `stall` | Transceivers + common CAN bus | Reproduces the MCP2517FD TX MAB underflow stall (DS80000792D item 1) with a receive-then-echo load at 500 Hz on `Normal20`, reports the fault signature, and times four recovery ladders. **Not yet run**; superseded for stall work by the `bench_*` binaries below, which control the delay rather than hoping for it. |
 | `blocking_core1` | Transceivers + common CAN bus | The blocking driver run on core 1 under the same `Normal20` load as `stall`, while core 0 measures its own scheduling jitter -- run the two back to back to see whether the cross-core DMA interrupt is what causes the stall. **Not yet run**; superseded by `bench_interference*`. |
 | `batch` | SPI wiring only | Times `transmit` in a loop against `transmit_batch` for ten chips, three frames each, and probes the partial-fill path against a two-deep FIFO. **Not yet verified on hardware.** |
+| `batch_contiguous` | SPI wiring only | Validates `transmit_batch_contiguous` on ten chips: three frames per cycle into a six-deep TX FIFO (so every second batch ends on the FIFO end), each frame read back and compared for ID, payload and order, timed against `transmit_batch`, plus an RX-FIFO refusal probe and a not-empty probe. Expect `ALL OK`. **Not yet verified on hardware.** |
 | `bench_async` | Transceivers + CAN bus on the GP15 chip | The async driver on core 1 — the configuration the stall appears under. **Verified: 76,000 cycles, 0 faults with core 0 idle**, which is what motivated `bench_interference`. |
 | `bench_blocking` | Transceivers + CAN bus on the GP15 chip | Identical workload, blocking driver. The control for `bench_async`. |
 | `bench_interference` | Transceivers + CAN bus on the GP15 chip | Core 0 masks its own interrupts for a swept duration, delaying `DMA_IRQ_0` and therefore nCS. **Verified: reproduces the stall, 294 faults, all recovered.** |
@@ -126,6 +127,7 @@ cargo run --release --bin regdump      # expect: per-chip register dump, no mism
 cargo run --release --bin stall        # expect: fault signature + ladder timings (not yet verified)
 cargo run --release --bin blocking_core1 # expect: core0/core1 jitter + stall counts (not yet verified)
 cargo run --release --bin batch        # expect: transmit vs transmit_batch timings within noise of each other
+cargo run --release --bin batch_contiguous # expect: mismatches 0, short 0, not_empty 0, timeouts 0, ALL OK
 ```
 
 The board reboots into the firmware and appears as a serial port (`COMn` on

@@ -11,7 +11,7 @@ use crate::registers::objects::{RxHeader, TxHeader, dlc_to_len, len_to_dlc};
 use crate::registers::ram::{FifoDirection, FifoLayout};
 use crate::registers::{
     CiCon, CiDbtCfg, CiFifoCon, CiFifoSta, CiInt, CiNbtCfg, CiTdc, CiTrec, CiVec, Fifo, Filter,
-    OperationMode, Osc, TdcMode, Variant, addr,
+    OperationMode, Osc, PayloadSize, TdcMode, Variant, addr,
 };
 use embedded_hal::delay::DelayNs;
 use embedded_hal::spi::SpiDevice;
@@ -19,6 +19,12 @@ use embedded_hal::spi::SpiDevice;
 use embedded_hal_async::delay::DelayNs as DelayNsAsync;
 #[cfg(feature = "async")]
 use embedded_hal_async::spi::SpiDevice as SpiDeviceAsync;
+
+/// Stack staging for `transmit_batch_contiguous`: 32 elements
+/// (the deepest FIFO) at the 16-byte stride of an 8-byte-`PLSIZE` FIFO, the
+/// size classic frames need. Larger-element FIFOs batch fewer frames per
+/// call rather than growing the stack frame.
+const MAX_CONTIGUOUS_BYTES: usize = 32 * 16;
 
 /// Driver for one MCP2517FD / MCP2518FD / MCP251863 chip.
 ///
@@ -494,6 +500,126 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
             }
         }
         Ok(accepted)
+    }
+
+    /// Queues several classic frames on an **empty** transmit FIFO with one
+    /// readiness read, one message-RAM write and one `TXREQ`, returning how
+    /// many were accepted.
+    ///
+    /// [`Self::transmit_batch`] still pays a read, a RAM write and a `UINC`
+    /// write per frame. Here the FIFO's `CiFIFOCON`, `CiFIFOSTA` and
+    /// `CiFIFOUA` come back in one transaction, all objects go out in a
+    /// single contiguous `write_ram`, and only the `UINC` writes remain
+    /// per frame (the register takes one pointer step per write), so `n`
+    /// frames cost `n + 2` chip-select assertions instead of `3n`. `TXREQ`
+    /// rides on the last `UINC` only, so the chip sees the whole burst at
+    /// once.
+    ///
+    /// # Contract
+    ///
+    /// - The FIFO must be empty (`CiFIFOSTA.TFERFFIF`). `TFNRFNIF` says only
+    ///   that one slot is free, and the status registers carry no free-slot
+    ///   count, so an empty FIFO is the only state in which the depth read
+    ///   from `FSIZE` is known to be free. If it is not empty the call
+    ///   queues nothing and returns `Ok(0)`; the caller retries next cycle.
+    /// - The FIFO must be a transmit FIFO (`CiFIFOCON.TXEN`); on a receive
+    ///   FIFO `TFERFFIF` means "full" and the write would clobber received
+    ///   frames, so it is refused with [`Error::CommunicationCheckFailed`].
+    /// - The result is capped at the FIFO depth and at 512 bytes of stack
+    ///   staging, i.e. `min(depth, 512 / (8 + PLSIZE))` frames (32 for
+    ///   `PLSIZE` 8, 7 for `PLSIZE` 64). A return below `frames.len()` is
+    ///   the prefix that fits. The wrap rule below applies to this
+    ///   *effective* length, which the caller cannot see from the return
+    ///   value alone: size batches to `min(depth, 512 / (8 + PLSIZE))` or
+    ///   less.
+    /// - Message objects are written at the chip's element stride,
+    ///   `8 + PLSIZE` bytes, taken from `CiFIFOCON` rather than packed by
+    ///   frame length (DS20006027B Register 3-22; Table 3-5). Classic frames
+    ///   fit any `PLSIZE`.
+    /// - **The run must not cross the end of the FIFO.** The driver keeps no
+    ///   record of where a FIFO starts, so it cannot see the wrap: when `UA`
+    ///   plus the batch passes the FIFO's last element, the chip's next
+    ///   elements are at the FIFO base, not above it, and the write would
+    ///   land in the neighbouring FIFO's RAM. The caller must keep every
+    ///   batch aligned to the depth (for example a depth that is a multiple
+    ///   of the effective batch length, with no other writer on this FIFO;
+    ///   a batch truncated by the depth cap is safe only when `UA` is at the
+    ///   FIFO base). Only the
+    ///   end of the 2048-byte message RAM is checked here
+    ///   ([`Error::CommunicationCheckFailed`]).
+    ///
+    /// `UA` is validated as in [`Self::transmit`]. Sequence numbers advance
+    /// once per accepted frame. Any error other than the above propagates.
+    ///
+    /// # Failure partway through the `UINC` writes
+    ///
+    /// Unlike [`Self::transmit_batch`], frames already stepped in carry no
+    /// `TXREQ` until the last write, so an SPI error mid-loop leaves them
+    /// queued and unsent. The FIFO is then non-empty, so every later call
+    /// returns `Ok(0)` and nothing ever requests transmission. Recover with
+    /// [`Self::reset_fifo`] (which also re-aligns `UA` with the caller's
+    /// batch arithmetic) before the next batch.
+    ///
+    /// A free slot is not a health signal; see [`Self::transmit`].
+    pub async fn transmit_batch_contiguous(
+        &mut self,
+        fifo: Fifo,
+        frames: &[Frame],
+    ) -> Result<u8, Error<SPI::Error>> {
+        if frames.is_empty() {
+            return Ok(0);
+        }
+        let [con, sta, ua] = self.bus.read_sfr32_triple(addr::fifo_con(fifo)).await?;
+        if !CiFifoCon(con).tx() {
+            return Err(Error::CommunicationCheckFailed);
+        }
+        if !CiFifoSta(sta).tx_empty_or_rx_full() {
+            return Ok(0);
+        }
+        // Validate the raw `UA` before narrowing, as `transmit_raw` does.
+        if ua >= addr::RAM_SIZE as u32 || ua % 4 != 0 {
+            return Err(Error::CommunicationCheckFailed);
+        }
+        // FSIZE (bits 28:24) holds depth - 1; PLSIZE (bits 31:29) is a code
+        // for 8, 12, 16, 20, 24, 32, 48 or 64 payload bytes.
+        let depth = ((con >> 24) & 0x1F) as usize + 1;
+        let stride = 8 + PayloadSize::from_code(con >> 29).bytes();
+        let count = frames.len().min(depth).min(MAX_CONTIGUOUS_BYTES / stride);
+        let total = count * stride;
+        if ua as usize + total > addr::RAM_SIZE {
+            return Err(Error::CommunicationCheckFailed);
+        }
+
+        let mut buf = [0u8; MAX_CONTIGUOUS_BYTES];
+        let block = &mut buf[..total];
+        for (frame, obj) in frames.iter().zip(block.chunks_exact_mut(stride)) {
+            let header = TxHeader {
+                id: frame.id(),
+                dlc: frame.dlc() as u8,
+                rtr: frame.is_remote(),
+                brs: false,
+                fdf: false,
+                esi: false,
+                seq: self.seq & self.seq_mask,
+            };
+            self.seq = self.seq.wrapping_add(1);
+            let [t0, t1] = header.to_words();
+            obj[0..4].copy_from_slice(&t0.to_le_bytes());
+            obj[4..8].copy_from_slice(&t1.to_le_bytes());
+            obj[8..8 + frame.data().len()].copy_from_slice(frame.data());
+        }
+
+        self.bus
+            .write_ram(addr::RAM_START + ua as u16, block)
+            .await?;
+        let con1 = addr::fifo_con(fifo) + 1;
+        for _ in 1..count {
+            self.bus.write_sfr8(con1, CiFifoCon::CON_BYTE1_UINC).await?;
+        }
+        self.bus
+            .write_sfr8(con1, CiFifoCon::CON_BYTE1_UINC_TXREQ)
+            .await?;
+        Ok(count as u8)
     }
 
     /// Queues a CAN FD frame. Same contract as [`Self::transmit`].

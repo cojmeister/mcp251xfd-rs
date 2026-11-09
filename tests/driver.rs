@@ -835,3 +835,173 @@ fn transmit_batch_of_nothing_is_a_no_op() {
     assert_eq!(can.transmit_batch(Fifo::F1, &[]).unwrap(), 0);
     spi.done();
 }
+
+/// One READ transaction returning three consecutive 32-bit registers
+/// (`CiFIFOCONm`, `CiFIFOSTAm`, `CiFIFOUAm`).
+fn r32_triple(addr: u16, a: u32, b: u32, c: u32) -> Vec<Transaction<u8>> {
+    let mut data = a.to_le_bytes().to_vec();
+    data.extend_from_slice(&b.to_le_bytes());
+    data.extend_from_slice(&c.to_le_bytes());
+    vec![
+        Transaction::transaction_start(),
+        Transaction::write_vec(vec![0x30 | (addr >> 8) as u8, (addr & 0xFF) as u8]),
+        Transaction::read_vec(data),
+        Transaction::transaction_end(),
+    ]
+}
+
+/// `CiFIFOCON1` of a TX FIFO, `PLSIZE` = 8 bytes, `depth` elements.
+fn tx_fifo_con(depth: u32) -> u32 {
+    ((depth - 1) << 24) | 0x80
+}
+
+/// `CiFIFOSTA` bits: not full + empty.
+const STA_EMPTY: u32 = 0x0000_0005;
+/// `CiFIFOSTA` bits: not full, not empty (one or more frames queued).
+const STA_PARTIAL: u32 = 0x0000_0001;
+
+#[test]
+fn transmit_batch_contiguous_writes_all_objects_in_one_ram_transaction() {
+    let frame = Frame::new(StandardId::new(0x123).unwrap(), &[1, 2, 3, 4]).unwrap();
+    // Elements sit 16 bytes apart (8 header + PLSIZE 8): each object is
+    // zero-padded to that stride so the next header lands where the chip
+    // expects it.
+    let mut block = Vec::new();
+    for seq in 0..3u8 {
+        block.extend_from_slice(&[
+            0x23,
+            0x01,
+            0x00,
+            0x00, // T0: SID 0x123
+            0x04,
+            seq << 1,
+            0x00,
+            0x00, // T1: DLC 4, SEQ = seq (bit 9 up)
+            0x01,
+            0x02,
+            0x03,
+            0x04,
+            0x00,
+            0x00,
+            0x00,
+            0x00, // payload + pad
+        ]);
+    }
+    let mut e = Vec::new();
+    e.extend(r32_triple(0x05C, tx_fifo_con(3), STA_EMPTY, 0x0000));
+    e.extend(wram(0x400, &block));
+    e.extend(w8(0x05D, 0x01)); // UINC only
+    e.extend(w8(0x05D, 0x01)); // UINC only
+    e.extend(w8(0x05D, 0x03)); // UINC | TXREQ: one request releases all three
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert_eq!(
+        can.transmit_batch_contiguous(Fifo::F1, &[frame, frame, frame])
+            .unwrap(),
+        3
+    );
+    spi.done();
+}
+
+#[test]
+fn transmit_batch_contiguous_queues_nothing_unless_the_fifo_is_empty() {
+    let frame = Frame::new(StandardId::new(0x123).unwrap(), &[]).unwrap();
+    // Not-full says only that one slot is free; with a frame already queued
+    // the batch could overwrite it, so nothing is written.
+    let e = r32_triple(0x05C, tx_fifo_con(3), STA_PARTIAL, 0x0010);
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert_eq!(
+        can.transmit_batch_contiguous(Fifo::F1, &[frame, frame])
+            .unwrap(),
+        0
+    );
+    spi.done();
+}
+
+#[test]
+fn transmit_batch_contiguous_is_capped_at_the_fifo_depth() {
+    let frame = Frame::new(StandardId::new(0x123).unwrap(), &[]).unwrap();
+    let mut block = Vec::new();
+    for seq in 0..2u8 {
+        block.extend_from_slice(&[0x23, 0x01, 0x00, 0x00, 0x00, seq << 1, 0x00, 0x00]);
+        block.extend_from_slice(&[0u8; 8]);
+    }
+    let mut e = Vec::new();
+    e.extend(r32_triple(0x05C, tx_fifo_con(2), STA_EMPTY, 0x0020));
+    e.extend(wram(0x420, &block));
+    e.extend(w8(0x05D, 0x01));
+    e.extend(w8(0x05D, 0x03));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert_eq!(
+        can.transmit_batch_contiguous(Fifo::F1, &[frame, frame, frame])
+            .unwrap(),
+        2,
+        "a depth-2 FIFO takes a two-frame prefix"
+    );
+    spi.done();
+}
+
+#[test]
+fn transmit_batch_contiguous_rejects_a_run_past_the_end_of_ram() {
+    let frame = Frame::new(StandardId::new(0x123).unwrap(), &[]).unwrap();
+    // 0x7F0 + 2 * 16 = 0x810 > 2048.
+    let e = r32_triple(0x05C, tx_fifo_con(2), STA_EMPTY, 0x07F0);
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert!(matches!(
+        can.transmit_batch_contiguous(Fifo::F1, &[frame, frame]),
+        Err(Error::CommunicationCheckFailed)
+    ));
+    spi.done();
+}
+
+#[test]
+fn transmit_batch_contiguous_of_nothing_is_a_no_op() {
+    let mut spi = Mock::new(&[]);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert_eq!(can.transmit_batch_contiguous(Fifo::F1, &[]).unwrap(), 0);
+    spi.done();
+}
+
+#[test]
+fn transmit_batch_contiguous_is_capped_by_the_staging_buffer_for_large_elements() {
+    let frame = Frame::new(StandardId::new(0x123).unwrap(), &[]).unwrap();
+    // PLSIZE 64 -> stride 72; depth 8; 512 / 72 = 7 elements fit the stage.
+    let con = (7u32 << 29) | (7 << 24) | 0x80;
+    let mut block = Vec::new();
+    for seq in 0..7u8 {
+        block.extend_from_slice(&[0x23, 0x01, 0x00, 0x00, 0x00, seq << 1, 0x00, 0x00]);
+        block.extend_from_slice(&[0u8; 64]);
+    }
+    let mut e = Vec::new();
+    e.extend(r32_triple(0x05C, con, STA_EMPTY, 0x0000));
+    e.extend(wram(0x400, &block));
+    for _ in 0..6 {
+        e.extend(w8(0x05D, 0x01));
+    }
+    e.extend(w8(0x05D, 0x03));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert_eq!(
+        can.transmit_batch_contiguous(Fifo::F1, &[frame; 8])
+            .unwrap(),
+        7
+    );
+    spi.done();
+}
+
+#[test]
+fn transmit_batch_contiguous_refuses_a_receive_fifo() {
+    let frame = Frame::new(StandardId::new(0x123).unwrap(), &[]).unwrap();
+    // TXEN clear: on an RX FIFO bit 2 means "full", not "empty".
+    let e = r32_triple(0x05C, 2 << 24, STA_EMPTY, 0x0000);
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert!(matches!(
+        can.transmit_batch_contiguous(Fifo::F1, &[frame]),
+        Err(Error::CommunicationCheckFailed)
+    ));
+    spi.done();
+}
