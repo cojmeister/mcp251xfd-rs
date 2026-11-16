@@ -209,6 +209,49 @@ fn apply_layout_writes_fifo_configs() {
 }
 
 #[test]
+fn timestamped_rx_fifo_costs_four_more_bytes_per_object() {
+    let layout = FifoLayout::new().rx_fifo_timestamped(Fifo::F1, PayloadSize::B8, 32);
+    assert_eq!(layout.total_bytes(), (8 + 4 + 8) * 32); // 640
+    assert!(layout.is_timestamped(Fifo::F1));
+    assert!(
+        !FifoLayout::new()
+            .rx_fifo(Fifo::F1, PayloadSize::B8, 32)
+            .is_timestamped(Fifo::F1)
+    );
+}
+
+#[test]
+fn apply_layout_sets_rxtsen_on_timestamped_rx_fifo() {
+    let layout = FifoLayout::new().rx_fifo_timestamped(Fifo::F1, PayloadSize::B8, 32);
+    let mut e = Vec::new();
+    e.extend(r32(0x000, 0x0080_0000)); // OPMOD=Config
+    // FSIZE=31<<24 | FRESET | RXTSEN | RXOVIE | TFNRFNIE.
+    e.extend(w32(0x05C, 0x1F00_0429));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    can.apply_layout(&layout).unwrap();
+    spi.done();
+}
+
+#[test]
+fn configure_time_base_writes_prescaler_and_enable() {
+    let e = w32(0x014, 19 | (1 << 16)); // TBCPRE = 19, TBCEN
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    can.configure_time_base(19).unwrap();
+    spi.done();
+}
+
+#[test]
+fn read_time_base_reads_c1tbc() {
+    let e = r32(0x010, 0xDEAD_BEEF);
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert_eq!(can.read_time_base().unwrap(), 0xDEAD_BEEF);
+    spi.done();
+}
+
+#[test]
 fn apply_layout_requires_config_mode() {
     let mut e = Vec::new();
     e.extend(r32(0x000, 0x0000_0000)); // OPMOD=NormalFd

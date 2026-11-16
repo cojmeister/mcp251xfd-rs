@@ -382,13 +382,30 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
                 .with_freset(true);
             reg = match entry.direction {
                 FifoDirection::Transmit => reg.with_tx(true),
-                FifoDirection::Receive => {
-                    reg.with_not_full_empty_ie(true).with_rx_overflow_ie(true)
-                }
+                FifoDirection::Receive => reg
+                    .with_not_full_empty_ie(true)
+                    .with_rx_overflow_ie(true)
+                    .with_rx_timestamp(layout.is_timestamped(fifo)),
             };
             self.bus.write_sfr32(addr::fifo_con(fifo), reg.0).await?;
         }
         Ok(())
+    }
+
+    /// Enables the free-running time base counter (`C1TBC`), which ticks
+    /// once per `prescaler + 1` system clocks and stamps timestamped RX
+    /// objects. `prescaler` is `TBCPRE` (10 bits, `0..=1023`).
+    pub async fn configure_time_base(&mut self, prescaler: u16) -> Result<(), Error<SPI::Error>> {
+        const TBCPRE_MASK: u32 = 0x3FF;
+        const TBCEN: u32 = 1 << 16;
+        self.bus
+            .write_sfr32(addr::C1TSCON, (u32::from(prescaler) & TBCPRE_MASK) | TBCEN)
+            .await
+    }
+
+    /// Reads the time base counter (`C1TBC`).
+    pub async fn read_time_base(&mut self) -> Result<u32, Error<SPI::Error>> {
+        self.bus.read_sfr32(addr::C1TBC).await
     }
 
     /// Configures and enables an acceptance filter routing matches into

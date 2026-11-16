@@ -89,6 +89,8 @@ pub enum LayoutError {
 pub struct FifoLayout {
     entries: [Option<FifoEntry>; 31],
     total: usize,
+    /// Bit `index - 1` set when that receive FIFO stores a timestamp.
+    timestamped: u32,
 }
 
 impl FifoLayout {
@@ -98,12 +100,22 @@ impl FifoLayout {
         Self {
             entries: [None; 31],
             total: 0,
+            timestamped: 0,
         }
     }
 
     /// Adds a FIFO. Errors instead of panicking; use this for layouts built
     /// at runtime.
     pub const fn try_add(self, fifo: Fifo, entry: FifoEntry) -> Result<Self, LayoutError> {
+        self.try_add_with_timestamp(fifo, entry, false)
+    }
+
+    const fn try_add_with_timestamp(
+        self,
+        fifo: Fifo,
+        entry: FifoEntry,
+        timestamped: bool,
+    ) -> Result<Self, LayoutError> {
         if entry.depth < 1 || entry.depth > 32 {
             return Err(LayoutError::BadDepth);
         }
@@ -111,13 +123,27 @@ impl FifoLayout {
         if self.entries[slot].is_some() {
             return Err(LayoutError::AlreadyConfigured);
         }
-        let total = self.total + entry.bytes();
+        let timestamp_bytes = if timestamped {
+            4 * entry.depth as usize
+        } else {
+            0
+        };
+        let total = self.total + entry.bytes() + timestamp_bytes;
         if total > addr::RAM_SIZE {
             return Err(LayoutError::RamOverflow);
         }
         let mut entries = self.entries;
         entries[slot] = Some(entry);
-        Ok(Self { entries, total })
+        let timestamped = if timestamped {
+            self.timestamped | (1 << slot)
+        } else {
+            self.timestamped
+        };
+        Ok(Self {
+            entries,
+            total,
+            timestamped,
+        })
     }
 
     /// Adds a transmit FIFO; see [`Self::try_add`].
@@ -154,6 +180,25 @@ impl FifoLayout {
         )
     }
 
+    /// Adds a receive FIFO whose objects carry a 4-byte hardware timestamp
+    /// (`RXTSEN`), so each element uses `8 + 4 + payload` bytes of RAM.
+    pub const fn try_rx_fifo_timestamped(
+        self,
+        fifo: Fifo,
+        payload: PayloadSize,
+        depth: u8,
+    ) -> Result<Self, LayoutError> {
+        self.try_add_with_timestamp(
+            fifo,
+            FifoEntry {
+                direction: FifoDirection::Receive,
+                payload,
+                depth,
+            },
+            true,
+        )
+    }
+
     /// Adds a transmit FIFO.
     ///
     /// # Panics
@@ -179,6 +224,22 @@ impl FifoLayout {
             Err(LayoutError::BadDepth) => panic!("FIFO depth must be 1..=32"),
             Err(LayoutError::AlreadyConfigured) => panic!("FIFO already configured"),
         }
+    }
+
+    /// Adds a timestamped receive FIFO. Panics like [`Self::tx_fifo`].
+    #[must_use]
+    pub const fn rx_fifo_timestamped(self, fifo: Fifo, payload: PayloadSize, depth: u8) -> Self {
+        match self.try_rx_fifo_timestamped(fifo, payload, depth) {
+            Ok(l) => l,
+            Err(LayoutError::RamOverflow) => panic!("FIFO layout exceeds 2048-byte message RAM"),
+            Err(LayoutError::BadDepth) => panic!("FIFO depth must be 1..=32"),
+            Err(LayoutError::AlreadyConfigured) => panic!("FIFO already configured"),
+        }
+    }
+
+    /// Whether `fifo` was added with a hardware timestamp per object.
+    pub const fn is_timestamped(&self, fifo: Fifo) -> bool {
+        self.timestamped & (1 << (fifo.index() - 1)) != 0
     }
 
     /// Total message-RAM bytes used (`<= 2048`).
