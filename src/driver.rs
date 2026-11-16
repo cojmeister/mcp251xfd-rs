@@ -26,6 +26,25 @@ use embedded_hal_async::spi::SpiDevice as SpiDeviceAsync;
 /// call rather than growing the stack frame.
 const MAX_CONTIGUOUS_BYTES: usize = 32 * 16;
 
+/// Bytes of one classic RX object in a timestamped, 8-byte-`PLSIZE` FIFO:
+/// 8-byte header, 4-byte timestamp, 8 payload bytes.
+const TIMESTAMPED_CLASSIC_OBJECT_BYTES: usize = 8 + 4 + 8;
+
+/// Validates a raw `CiFIFOUA` read and returns the message RAM address of the
+/// RX object, or `None` if an object of `object_bytes` would not fit.
+///
+/// Validates the *raw* value before narrowing, so a `ua` near `u32::MAX`
+/// can't slip through via a wrapped `usize` addition on a 32-bit target.
+fn rx_object_address(ua: u32, object_bytes: usize) -> Option<u16> {
+    if ua >= addr::RAM_SIZE as u32 || ua % 4 != 0 {
+        return None;
+    }
+    if ua as usize + object_bytes > addr::RAM_SIZE {
+        return None;
+    }
+    Some(addr::RAM_START + ua as u16)
+}
+
 /// Driver for one MCP2517FD / MCP2518FD / MCP251863 chip.
 ///
 /// Generic over [`embedded_hal::spi::SpiDevice`]; chip-select framing is the
@@ -382,13 +401,30 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
                 .with_freset(true);
             reg = match entry.direction {
                 FifoDirection::Transmit => reg.with_tx(true),
-                FifoDirection::Receive => {
-                    reg.with_not_full_empty_ie(true).with_rx_overflow_ie(true)
-                }
+                FifoDirection::Receive => reg
+                    .with_not_full_empty_ie(true)
+                    .with_rx_overflow_ie(true)
+                    .with_rx_timestamp(layout.is_timestamped(fifo)),
             };
             self.bus.write_sfr32(addr::fifo_con(fifo), reg.0).await?;
         }
         Ok(())
+    }
+
+    /// Enables the free-running time base counter (`C1TBC`), which ticks
+    /// once per `prescaler + 1` system clocks and stamps timestamped RX
+    /// objects. `prescaler` is `TBCPRE` (10 bits, `0..=1023`).
+    pub async fn configure_time_base(&mut self, prescaler: u16) -> Result<(), Error<SPI::Error>> {
+        const TBCPRE_MASK: u32 = 0x3FF;
+        const TBCEN: u32 = 1 << 16;
+        self.bus
+            .write_sfr32(addr::C1TSCON, (u32::from(prescaler) & TBCPRE_MASK) | TBCEN)
+            .await
+    }
+
+    /// Reads the time base counter (`C1TBC`).
+    pub async fn read_time_base(&mut self) -> Result<u32, Error<SPI::Error>> {
+        self.bus.read_sfr32(addr::C1TBC).await
     }
 
     /// Configures and enables an acceptance filter routing matches into
@@ -765,25 +801,21 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// that FIFO's TX message object as if it were an RX one — arbitrary
     /// identifier, DLC and payload — *and* still writes `UINC`, advancing
     /// the transmit FIFO's tail past an element the chip has not sent.
+    ///
+    /// `fifo` must not be one configured with
+    /// [`FifoLayout::rx_fifo_timestamped`]. The driver keeps no per-FIFO
+    /// timestamp record, so such a FIFO would return the timestamp word as
+    /// the first four payload bytes and drop the last four; use
+    /// [`Self::receive_classic_timestamped`] for those.
     pub async fn receive(&mut self, fifo: Fifo) -> Result<RxFrame, Error<SPI::Error>> {
         let (sta_raw, ua) = self.bus.read_sfr32_pair(addr::fifo_sta(fifo)).await?;
         if !CiFifoSta(sta_raw).not_full_or_not_empty() {
             return Err(Error::RxFifoEmpty);
         }
-        // Validate the *raw* read before narrowing, as in `transmit_raw`:
-        // `ua >= RAM_SIZE` is caught here rather than folded into the
-        // end-bound check below, so a `ua` near `u32::MAX` can't slip through
-        // via a wrapped `usize` addition on a 32-bit target.
-        if ua >= addr::RAM_SIZE as u32 || ua % 4 != 0 {
-            return Err(Error::CommunicationCheckFailed);
-        }
         // Every RX object starts with an 8-byte header, so a `UA` above
         // `RAM_SIZE - 8` is implausible and would make the header read below
         // run past the end of message RAM on its own.
-        if ua as usize + 8 > addr::RAM_SIZE {
-            return Err(Error::CommunicationCheckFailed);
-        }
-        let base = addr::RAM_START + ua as u16;
+        let base = rx_object_address(ua, 8).ok_or(Error::CommunicationCheckFailed)?;
 
         let mut hdr = [0u8; 8];
         self.bus.read_ram(base, &mut hdr).await?;
@@ -832,6 +864,60 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
         Ok(RxFrame {
             frame,
             timestamp: None,
+        })
+    }
+
+    /// Pops one classic frame, with its hardware timestamp, from a
+    /// timestamped receive FIFO in exactly three SPI transactions: status and
+    /// user address, one read of the whole 20-byte object (header, timestamp,
+    /// 8 payload bytes), and the `UINC`. Non-blocking: [`Error::RxFifoEmpty`]
+    /// when there is nothing to read, after a single transaction.
+    ///
+    /// The returned [`RxFrame::timestamp`] is the time base counter value
+    /// captured at the sample point (see [`Self::configure_time_base`]).
+    ///
+    /// Precondition, documented and not checked (the driver keeps no
+    /// per-FIFO record): `fifo` is a receive FIFO configured with
+    /// [`FifoLayout::rx_fifo_timestamped`] and [`PayloadSize::B8`]. A frame
+    /// whose DLC exceeds 8 is reported with its length capped at 8, as in
+    /// [`Self::receive`]; a remote frame returns zeroed data.
+    ///
+    /// Fails with [`Error::CommunicationCheckFailed`] if `CiFIFOUA` is
+    /// unaligned or too close to the end of message RAM to hold the 20-byte
+    /// object; no RAM access is attempted in that case.
+    pub async fn receive_classic_timestamped(
+        &mut self,
+        fifo: Fifo,
+    ) -> Result<RxFrame, Error<SPI::Error>> {
+        let (sta_raw, ua) = self.bus.read_sfr32_pair(addr::fifo_sta(fifo)).await?;
+        if !CiFifoSta(sta_raw).not_full_or_not_empty() {
+            return Err(Error::RxFifoEmpty);
+        }
+        let base = rx_object_address(ua, TIMESTAMPED_CLASSIC_OBJECT_BYTES)
+            .ok_or(Error::CommunicationCheckFailed)?;
+
+        let mut object = [0u8; TIMESTAMPED_CLASSIC_OBJECT_BYTES];
+        self.bus.read_ram(base, &mut object).await?;
+        self.bus
+            .write_sfr8(addr::fifo_con(fifo) + 1, CiFifoCon::CON_BYTE1_UINC)
+            .await?;
+
+        let id_word = u32::from_le_bytes([object[0], object[1], object[2], object[3]]);
+        let flags_word = u32::from_le_bytes([object[4], object[5], object[6], object[7]]);
+        let timestamp = u32::from_le_bytes([object[8], object[9], object[10], object[11]]);
+        let header = RxHeader::from_words([id_word, flags_word]);
+
+        let len = dlc_to_len(header.dlc, false);
+        let mut data = [0u8; 8];
+        // A remote frame carries no data; the slot holds a previous occupant.
+        if !header.rtr {
+            data[..len].copy_from_slice(&object[12..12 + len]);
+        }
+        Ok(RxFrame {
+            frame: ReceivedFrame::Classic(Frame::from_parts(
+                header.id, len as u8, header.rtr, data,
+            )),
+            timestamp: Some(timestamp),
         })
     }
 

@@ -20,6 +20,8 @@ pub mod addr {
     pub const C1TDC: u16 = 0x00C;
     /// Free-running time base counter.
     pub const C1TBC: u16 = 0x010;
+    /// Time base counter configuration (`TBCPRE`, `TBCEN`).
+    pub const C1TSCON: u16 = 0x014;
     /// Interrupt vector code register.
     pub const C1VEC: u16 = 0x018;
     /// Interrupt flags (low half) and enables (high half).

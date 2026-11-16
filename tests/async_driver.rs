@@ -94,3 +94,29 @@ async fn async_receive_empty_errors() {
     ));
     spi.done();
 }
+
+#[tokio::test]
+async fn async_receive_classic_timestamped_reads_timestamp() {
+    let mut e = Vec::new();
+    e.extend(r32_pair(0x06C, 0x0000_0001, 0x0000_0040));
+    // Standard id 0x123, DLC 2, timestamp 7, data [9, 8, ...].
+    let mut object = Vec::new();
+    object.extend_from_slice(&0x123u32.to_le_bytes());
+    object.extend_from_slice(&0x0000_0002u32.to_le_bytes());
+    object.extend_from_slice(&7u32.to_le_bytes());
+    object.extend_from_slice(&[9, 8, 0, 0, 0, 0, 0, 0]);
+    e.extend(rram(0x440, &object));
+    e.extend(w8(0x069, 0x01));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFdAsync::new(&mut spi);
+    let rx = can.receive_classic_timestamped(Fifo::F2).await.unwrap();
+    match rx.frame {
+        ReceivedFrame::Classic(f) => {
+            assert_eq!(f.dlc(), 2);
+            assert_eq!(f.data(), &[9, 8]);
+        }
+        ReceivedFrame::Fd(_) => panic!("expected classic frame"),
+    }
+    assert_eq!(rx.timestamp, Some(7));
+    spi.done();
+}
