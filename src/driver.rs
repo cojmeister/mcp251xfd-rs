@@ -782,6 +782,12 @@ impl<SPI: SpiDevice> MCP251xFd<SPI> {
     /// that FIFO's TX message object as if it were an RX one — arbitrary
     /// identifier, DLC and payload — *and* still writes `UINC`, advancing
     /// the transmit FIFO's tail past an element the chip has not sent.
+    ///
+    /// `fifo` must not be one configured with
+    /// [`FifoLayout::rx_fifo_timestamped`]. The driver keeps no per-FIFO
+    /// timestamp record, so such a FIFO would return the timestamp word as
+    /// the first four payload bytes and drop the last four; use
+    /// `receive_classic_timestamped` for those.
     pub async fn receive(&mut self, fifo: Fifo) -> Result<RxFrame, Error<SPI::Error>> {
         let (sta_raw, ua) = self.bus.read_sfr32_pair(addr::fifo_sta(fifo)).await?;
         if !CiFifoSta(sta_raw).not_full_or_not_empty() {
