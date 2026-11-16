@@ -1,7 +1,7 @@
 //! Byte-exact integration tests for the sync driver against a mock SPI bus.
 
 use embedded_can::Frame as _;
-use embedded_can::{Id, StandardId};
+use embedded_can::{ExtendedId, Id, StandardId};
 use embedded_hal_mock::eh1::delay::NoopDelay;
 use embedded_hal_mock::eh1::spi::{Mock, Transaction};
 use mcp251xfd::{
@@ -1044,6 +1044,62 @@ fn transmit_batch_contiguous_refuses_a_receive_fifo() {
     let mut can = MCP251xFd::new(&mut spi);
     assert!(matches!(
         can.transmit_batch_contiguous(Fifo::F1, &[frame]),
+        Err(Error::CommunicationCheckFailed)
+    ));
+    spi.done();
+}
+
+#[test]
+fn receive_classic_timestamped_is_three_transactions() {
+    let mut e = Vec::new();
+    e.extend(r32_pair(0x06C, 0x0000_0001, 0x0000_0040)); // CiFIFOSTA2 not empty, CiFIFOUA2 0x40
+    let mut object = Vec::new();
+    object.extend_from_slice(
+        &((0x18EC_0021u32 >> 18) | ((0x18EC_0021u32 & 0x3_FFFF) << 11)).to_le_bytes(),
+    );
+    object.extend_from_slice(&0x0000_0000_u32.to_le_bytes());
+    object.extend_from_slice(&0x0001_E240u32.to_le_bytes());
+    object.extend_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+    object[4..8].copy_from_slice(&(0x8u32 | (1 << 4)).to_le_bytes()); // DLC 8, IDE
+    e.extend(rram(0x440, &object));
+    e.extend(w8(0x069, 0x01)); // CiFIFOCON2 byte1: UINC
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    let rx = can.receive_classic_timestamped(Fifo::F2).unwrap();
+    match rx.frame {
+        ReceivedFrame::Classic(f) => {
+            assert_eq!(f.id(), Id::Extended(ExtendedId::new(0x18EC_0021).unwrap()));
+            assert_eq!(f.dlc(), 8);
+            assert_eq!(f.data(), &[1, 2, 3, 4, 5, 6, 7, 8]);
+        }
+        ReceivedFrame::Fd(_) => panic!("expected classic frame"),
+    }
+    assert_eq!(rx.timestamp, Some(0x0001_E240));
+    spi.done();
+}
+
+#[test]
+fn receive_classic_timestamped_empty_fifo_is_one_transaction() {
+    let mut e = Vec::new();
+    e.extend(r32_pair(0x06C, 0x0000_0000, 0x0000_0000));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert!(matches!(
+        can.receive_classic_timestamped(Fifo::F2),
+        Err(Error::RxFifoEmpty)
+    ));
+    spi.done();
+}
+
+#[test]
+fn receive_classic_timestamped_rejects_ua_past_ram_end() {
+    // 2048 - 16 leaves room for a 16-byte object but not the 20-byte one.
+    let mut e = Vec::new();
+    e.extend(r32_pair(0x06C, 0x0000_0001, 0x0000_07F0));
+    let mut spi = Mock::new(&e);
+    let mut can = MCP251xFd::new(&mut spi);
+    assert!(matches!(
+        can.receive_classic_timestamped(Fifo::F2),
         Err(Error::CommunicationCheckFailed)
     ));
     spi.done();

@@ -220,9 +220,8 @@ impl defmt::Format for FdFrame {
 pub struct RxFrame {
     /// The received frame.
     pub frame: ReceivedFrame,
-    /// RX timestamp. Always `None` in this version (timestamping is not
-    /// yet configurable).
-    // TODO: allow enabling RX timestamps (RXTSEN) and populate this field.
+    /// RX timestamp (time base counter ticks). `Some` only from
+    /// `receive_classic_timestamped`; `None` from `receive`.
     pub timestamp: Option<u32>,
 }
 

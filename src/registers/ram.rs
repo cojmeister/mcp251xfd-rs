@@ -229,7 +229,7 @@ impl FifoLayout {
     /// Adds a timestamped receive FIFO. Panics like [`Self::tx_fifo`].
     ///
     /// Do not read it with `receive()`: the timestamp word would come back as
-    /// the first four payload bytes; use `receive_classic_timestamped`.
+    /// the first four payload bytes; use [`MCP251xFd::receive_classic_timestamped`](crate::MCP251xFd::receive_classic_timestamped).
     #[must_use]
     pub const fn rx_fifo_timestamped(self, fifo: Fifo, payload: PayloadSize, depth: u8) -> Self {
         match self.try_rx_fifo_timestamped(fifo, payload, depth) {
