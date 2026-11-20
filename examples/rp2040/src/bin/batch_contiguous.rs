@@ -250,9 +250,8 @@ async fn main(spawner: Spawner) {
             "pass {pass}: baseline   mismatches {} short {} not_empty {} timeouts {} errors {}",
             b.mismatches, b.short, b.not_empty, b.timeouts, b.errors
         );
-        let clean = |t: &Tally| {
-            t.mismatches == 0 && t.short == 0 && t.timeouts == 0 && t.errors == 0
-        };
+        let clean =
+            |t: &Tally| t.mismatches == 0 && t.short == 0 && t.timeouts == 0 && t.errors == 0;
         if clean(&c) && clean(&b) && probes_ok {
             info!("pass {pass}: ALL OK");
         } else {
